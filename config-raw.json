@@ -705,6 +705,44 @@
             ]
         },
         {
+            "key": "calendar",
+            "comment": "Finally Server calendar-context settings. Calendar connections require keyvalue.type=redis so encrypted credentials survive server restarts.",
+            "children": [
+                {
+                    "key": "encryptionkey",
+                    "default_value": "",
+                    "comment": "Stable deployment-specific key material used to encrypt calendar credentials. This value must remain unchanged across server restarts."
+                },
+                {
+                    "key": "google",
+                    "children": [
+                        {
+                            "key": "clientid",
+                            "default_value": "",
+                            "comment": "Google OAuth client id."
+                        },
+                        {
+                            "key": "clientsecret",
+                            "default_value": "",
+                            "comment": "Google OAuth client secret."
+                        },
+                        {
+                            "key": "tokenurl",
+                            "default_value": "https://oauth2.googleapis.com/token"
+                        },
+                        {
+                            "key": "apiurl",
+                            "default_value": "https://www.googleapis.com"
+                        },
+                        {
+                            "key": "revokeurl",
+                            "default_value": "https://oauth2.googleapis.com/revoke"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
             "key": "auth",
             "children": [
                 {

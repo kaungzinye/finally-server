@@ -67,6 +67,16 @@ func TestFinallyServerOpenAPIContract(t *testing.T) {
 		"/finally/tasks/{projecttask}/complete": {
 			"post": {OperationID: "finally-tasks-complete"},
 		},
+		"/finally/calendar/accounts": {
+			"get":  {OperationID: "finally-calendar-accounts-list"},
+			"post": {OperationID: "finally-calendar-accounts-connect"},
+		},
+		"/finally/calendar/accounts/{account}": {
+			"delete": {OperationID: "finally-calendar-accounts-revoke"},
+		},
+		"/finally/calendar/context": {
+			"post": {OperationID: "finally-calendar-context-read"},
+		},
 	}, contract.Paths)
 	assert.Equal(t, "User session JWT issued via /api/v2/finally/login.", contract.Components.SecuritySchemes["JWTKeyAuth"].Description)
 	assert.Equal(t, "Vikunja API token (tk_ prefix) with scoped permissions. Created via /api/v2/tokens.", contract.Components.SecuritySchemes["APITokenAuth"].Description)
