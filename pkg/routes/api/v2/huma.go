@@ -70,7 +70,7 @@ const GroupPrefix = "/api/v2"
 // NewAPI mounts Huma on the /api/v2 group. Per-resource Register* calls
 // live in sibling files.
 func NewAPI(e *echo.Echo, g *echo.Group) huma.API {
-	cfg := huma.DefaultConfig("Vikunja API", version.Version)
+	cfg := huma.DefaultConfig("Finally Server API", version.Version)
 	cfg.OpenAPIPath = "/openapi"
 	// Huma's built-in docs would load from unpkg.com — we serve Scalar locally instead.
 	cfg.DocsPath = ""
@@ -100,12 +100,12 @@ func NewAPI(e *echo.Echo, g *echo.Group) huma.API {
 		Type:         "http",
 		Scheme:       "bearer",
 		BearerFormat: "JWT",
-		Description:  "User session JWT issued via /api/v1/login.",
+		Description:  "User session JWT issued via /api/v2/login.",
 	}
 	oapi.Components.SecuritySchemes["APITokenAuth"] = &huma.SecurityScheme{
 		Type:        "http",
 		Scheme:      "bearer",
-		Description: "Vikunja API token (tk_ prefix) with scoped permissions. Created via /api/v1/tokens.",
+		Description: "Vikunja API token (tk_ prefix) with scoped permissions. Created via /api/v2/tokens.",
 	}
 	// HTTP Basic, used only by the notifications Atom feed: feed readers can't
 	// carry a bearer header, so the feed accepts the API token as the Basic

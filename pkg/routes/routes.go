@@ -352,6 +352,8 @@ var unauthenticatedAPIPaths = map[string]bool{
 	"/api/v2/docs":                      true,
 	"/api/v2/docs/scalar.standalone.js": true,
 	"/api/v2/schemas/:schema":           true,
+	"/api/v2/finally/openapi.json":      true,
+	"/api/v2/finally/login":             true,
 	"/api/v2/info":                      true,
 
 	"/api/v2/register":                       true,
@@ -460,6 +462,7 @@ func registerAPIRoutesV2(e *echo.Echo, a *echo.Group) {
 
 	// Resources self-register via init(); RegisterAll runs them all + AutoPatch.
 	apiv2.RegisterAll(api)
+	apiv2.RegisterFinallyRoutes(api)
 }
 
 func registerAPIRoutes(a *echo.Group) {

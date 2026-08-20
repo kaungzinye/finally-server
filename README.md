@@ -1,3 +1,39 @@
+# Finally Server
+
+Finally Server is the authenticated, self-hosted task authority for Finally clients. It is a public fork of Vikunja and retains Vikunja's upstream history, attribution, and AGPL-3.0-or-later license.
+
+## Local backend setup
+
+Install Go 1.26.4 and Mage 1.17.2, then build and run the server with a local SQLite database:
+
+```bash
+export VIKUNJA_DATABASE_TYPE=sqlite
+export VIKUNJA_DATABASE_PATH="$PWD/finally.db"
+export VIKUNJA_SERVICE_SECRET="replace-this-local-development-secret"
+
+mage build
+./vikunja user create --username finally --email finally@example.com --password 'local-password'
+./vikunja
+```
+
+The server listens on `http://localhost:3456` by default. Use a strong, deployment-specific service secret outside local development.
+
+## Versioned task API
+
+Finally iOS and automation clients use only the narrow `/api/v2/finally` surface. Sign in with `POST /api/v2/finally/login`, then send the returned JWT as `Authorization: Bearer <token>`. API tokens are also accepted according to their configured scopes.
+
+The minimal task lifecycle uses these authenticated routes:
+
+- `POST /api/v2/finally/projects/{project}/tasks` creates a task.
+- `GET /api/v2/finally/tasks/{projecttask}` reads a task.
+- `PUT /api/v2/finally/tasks/{projecttask}` updates a task.
+- `POST /api/v2/finally/tasks/{projecttask}/complete` completes a task.
+- `DELETE /api/v2/finally/tasks/{projecttask}` deletes a task.
+
+The matching machine-readable contract is served at `/api/v2/finally/openapi.json` and contains only login and the task lifecycle above. The inherited web application and server administration continue to use the full `/api/v2` surface, documented at `/api/v2/openapi.json` with its local Scalar reference at `/api/v2/docs`. New client API work belongs under `/api/v2/finally`; inherited `/api/v1` routes remain frozen.
+
+---
+
 <img src="https://vikunja.io/images/vikunja-logo.svg" alt="" style="display: block;width: 50%;margin: 0 auto;" width="50%"/>
 
 [![Build Status](https://github.com/go-vikunja/vikunja/actions/workflows/ci.yml/badge.svg)](https://github.com/go-vikunja/vikunja/actions/workflows/ci.yml)
