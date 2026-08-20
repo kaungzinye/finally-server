@@ -44,6 +44,14 @@ func RegisterFinallyRoutes(api huma.API) {
 		Security:      publicSecurity,
 	}, authLogin)
 	Register(api, huma.Operation{
+		OperationID: "finally-tasks-list",
+		Summary:     "List Finally tasks",
+		Description: "Returns the authenticated user's tasks in one project, paginated and flat.",
+		Method:      http.MethodGet,
+		Path:        "/finally/projects/{project}/tasks",
+		Tags:        tags,
+	}, projectTasksList)
+	Register(api, huma.Operation{
 		OperationID: "finally-tasks-create",
 		Summary:     "Create a Finally task",
 		Method:      http.MethodPost,
@@ -133,7 +141,7 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 	calendarAccounts := source.Paths["/finally/calendar/accounts"]
 	calendarAccount := source.Paths["/finally/calendar/accounts/{account}"]
 	calendarContext := source.Paths["/finally/calendar/context"]
-	if login == nil || login.Post == nil || create == nil || create.Post == nil ||
+	if login == nil || login.Post == nil || create == nil || create.Get == nil || create.Post == nil ||
 		task == nil || task.Get == nil || task.Put == nil || task.Delete == nil ||
 		complete == nil || complete.Post == nil || calendarAccounts == nil ||
 		calendarAccounts.Post == nil || calendarAccounts.Get == nil || calendarAccount == nil ||
@@ -150,6 +158,7 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 			Post: login.Post,
 		},
 		"/finally/projects/{project}/tasks": {
+			Get:  create.Get,
 			Post: create.Post,
 		},
 		"/finally/tasks/{projecttask}": {
