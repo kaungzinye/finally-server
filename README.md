@@ -30,7 +30,23 @@ The minimal task lifecycle uses these authenticated routes:
 - `POST /api/v2/finally/tasks/{projecttask}/complete` completes a task.
 - `DELETE /api/v2/finally/tasks/{projecttask}` deletes a task.
 
-The matching machine-readable contract is served at `/api/v2/finally/openapi.json` and contains only login and the task lifecycle above. The inherited web application and server administration continue to use the full `/api/v2` surface, documented at `/api/v2/openapi.json` with its local Scalar reference at `/api/v2/docs`. New client API work belongs under `/api/v2/finally`; inherited `/api/v1` routes remain frozen.
+The matching machine-readable contract is served at `/api/v2/finally/openapi.json` and contains login, task lifecycle, and planning-context operations. The inherited web application and server administration continue to use the full `/api/v2` surface, documented at `/api/v2/openapi.json` with its local Scalar reference at `/api/v2/docs`. New client API work belongs under `/api/v2/finally`; inherited `/api/v1` routes remain frozen.
+
+## Private calendar context
+
+Configure a Google OAuth client and Redis before connecting calendar accounts:
+
+```bash
+export VIKUNJA_KEYVALUE_TYPE=redis
+export VIKUNJA_REDIS_ENABLED=true
+export VIKUNJA_CALENDAR_ENCRYPTIONKEY="stable-random-calendar-key"
+export VIKUNJA_CALENDAR_GOOGLE_CLIENTID="google-client-id"
+export VIKUNJA_CALENDAR_GOOGLE_CLIENTSECRET="google-client-secret"
+```
+
+`POST /api/v2/finally/calendar/accounts` exchanges a Google authorization code, `GET /api/v2/finally/calendar/accounts` lists the current user's connections, and `DELETE /api/v2/finally/calendar/accounts/{account}` revokes one. `POST /api/v2/finally/calendar/context` fetches event descriptions and attendee context for a bounded planning window.
+
+Finally Server encrypts Google tokens with the stable calendar encryption key before writing them to Redis. Calendar event bodies remain request-scoped: the server returns them to the authenticated planning client without writing them to task storage, Redis, routine logs, or database backups. Calendar connection setup returns a recoverable service-unavailable response when durable Redis storage or stable encryption key material is not configured.
 
 ---
 

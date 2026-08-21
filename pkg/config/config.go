@@ -199,6 +199,15 @@ const (
 
 	KeyvalueType Key = `keyvalue.type`
 
+	// #nosec G101 -- Configuration key name, not a credential.
+	CalendarEncryptionKey  Key = `calendar.encryptionkey`
+	CalendarGoogleClientID Key = `calendar.google.clientid`
+	// #nosec G101 -- Configuration key name, not a credential.
+	CalendarGoogleClientSecret Key = `calendar.google.clientsecret`
+	CalendarGoogleTokenURL     Key = `calendar.google.tokenurl`
+	CalendarGoogleAPIURL       Key = `calendar.google.apiurl`
+	CalendarGoogleRevokeURL    Key = `calendar.google.revokeurl`
+
 	MetricsEnabled  Key = `metrics.enabled`
 	MetricsUsername Key = `metrics.username`
 	MetricsPassword Key = `metrics.password`
@@ -479,6 +488,12 @@ func InitDefaultConfig() {
 	BackgroundsUnsplashEnabled.setDefault(false)
 	// Key Value
 	KeyvalueType.setDefault("memory")
+	CalendarEncryptionKey.setDefault("")
+	CalendarGoogleClientID.setDefault("")
+	CalendarGoogleClientSecret.setDefault("")
+	CalendarGoogleTokenURL.setDefault("https://oauth2.googleapis.com/token")
+	CalendarGoogleAPIURL.setDefault("https://www.googleapis.com")
+	CalendarGoogleRevokeURL.setDefault("https://oauth2.googleapis.com/revoke")
 	// Metrics
 	MetricsEnabled.setDefault(false)
 	// Settings

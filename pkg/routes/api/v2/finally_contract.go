@@ -80,6 +80,7 @@ func RegisterFinallyRoutes(api huma.API) {
 		DefaultStatus: http.StatusOK,
 		Tags:          tags,
 	}, finallyTasksComplete)
+	RegisterFinallyCalendarRoutes(api)
 
 	contract, err := finallyClientContract(api.OpenAPI())
 	if err != nil {
@@ -129,15 +130,20 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 	create := source.Paths["/finally/projects/{project}/tasks"]
 	task := source.Paths["/finally/tasks/{projecttask}"]
 	complete := source.Paths["/finally/tasks/{projecttask}/complete"]
+	calendarAccounts := source.Paths["/finally/calendar/accounts"]
+	calendarAccount := source.Paths["/finally/calendar/accounts/{account}"]
+	calendarContext := source.Paths["/finally/calendar/context"]
 	if login == nil || login.Post == nil || create == nil || create.Post == nil ||
 		task == nil || task.Get == nil || task.Put == nil || task.Delete == nil ||
-		complete == nil || complete.Post == nil {
+		complete == nil || complete.Post == nil || calendarAccounts == nil ||
+		calendarAccounts.Post == nil || calendarAccounts.Get == nil || calendarAccount == nil ||
+		calendarAccount.Delete == nil || calendarContext == nil || calendarContext.Post == nil {
 		return nil, fmt.Errorf("build Finally client contract: required lifecycle operation is missing")
 	}
 
 	info := *source.Info
 	info.Title = "Finally Client API"
-	info.Description = "The authenticated task lifecycle used by Finally iOS and automation clients."
+	info.Description = "The authenticated task and planning-context API used by Finally iOS and automation clients."
 
 	paths := map[string]*huma.PathItem{
 		"/finally/login": {
@@ -153,6 +159,16 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 		},
 		"/finally/tasks/{projecttask}/complete": {
 			Post: complete.Post,
+		},
+		"/finally/calendar/accounts": {
+			Get:  calendarAccounts.Get,
+			Post: calendarAccounts.Post,
+		},
+		"/finally/calendar/accounts/{account}": {
+			Delete: calendarAccount.Delete,
+		},
+		"/finally/calendar/context": {
+			Post: calendarContext.Post,
 		},
 	}
 	components, err := finallyClientComponents(source.Components, paths)
