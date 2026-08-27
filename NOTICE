@@ -1,0 +1,9 @@
+Finally Server
+Finally-specific modifications copyright 2026 Kaung Zin Ye and contributors
+
+Finally Server is derived from Vikunja:
+https://github.com/go-vikunja/vikunja
+
+Vikunja source files and assets retain their upstream copyright and license notices. Most of this repository is licensed under AGPL-3.0-or-later. Directories with their own LICENSE files remain under those licenses.
+
+Finally Server is an independent fork. It is not endorsed by or affiliated with the Vikunja maintainers.
