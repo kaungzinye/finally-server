@@ -57,6 +57,7 @@ func TestFinallyServerOpenAPIContract(t *testing.T) {
 			"post": {OperationID: "finally-auth-login"},
 		},
 		"/finally/projects/{project}/tasks": {
+			"get":  {OperationID: "finally-tasks-list"},
 			"post": {OperationID: "finally-tasks-create"},
 		},
 		"/finally/tasks/{projecttask}": {
@@ -151,6 +152,16 @@ func TestFinallyServerAuthenticatedTaskLifecycle(t *testing.T) {
 	assert.Equal(t, "Plan tomorrow", task.Title)
 	assert.False(t, task.Done)
 
+	listed := humaRequest(t, e, http.MethodGet, "/api/v2/finally/projects/1/tasks", "", token, "")
+	require.Equal(t, http.StatusOK, listed.Code, "body: %s", listed.Body.String())
+	var taskList struct {
+		Items []taskResponse `json:"items"`
+		Total int64          `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(listed.Body.Bytes(), &taskList))
+	assert.GreaterOrEqual(t, taskList.Total, int64(1))
+	assert.Contains(t, taskList.Items, task)
+
 	taskPath := fmt.Sprintf("/api/v2/finally/tasks/%d", task.ID)
 	read := humaRequest(t, e, http.MethodGet, taskPath, "", token, "")
 	require.Equal(t, http.StatusOK, read.Code, "body: %s", read.Body.String())
@@ -190,6 +201,7 @@ func TestFinallyServerTaskLifecycleRequiresAuthentication(t *testing.T) {
 		path   string
 		body   string
 	}{
+		{name: "list", method: http.MethodGet, path: "/api/v2/finally/projects/1/tasks"},
 		{name: "create", method: http.MethodPost, path: "/api/v2/finally/projects/1/tasks", body: `{"title":"Unauthorized"}`},
 		{name: "read", method: http.MethodGet, path: "/api/v2/finally/tasks/1"},
 		{name: "update", method: http.MethodPut, path: "/api/v2/finally/tasks/1", body: `{"title":"Unauthorized"}`},
@@ -216,6 +228,7 @@ func TestFinallyServerTaskLifecycleRequiresPermission(t *testing.T) {
 		path   string
 		body   string
 	}{
+		{name: "list", method: http.MethodGet, path: "/api/v2/finally/projects/1/tasks"},
 		{name: "create", method: http.MethodPost, path: "/api/v2/finally/projects/1/tasks", body: `{"title":"Forbidden"}`},
 		{name: "read", method: http.MethodGet, path: "/api/v2/finally/tasks/1"},
 		{name: "update", method: http.MethodPut, path: "/api/v2/finally/tasks/1", body: `{"title":"Forbidden"}`},

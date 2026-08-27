@@ -21,7 +21,7 @@ func TestFinallyClientContractRequiresSecuritySchemes(t *testing.T) {
 		Info: &huma.Info{},
 		Paths: map[string]*huma.PathItem{
 			"/finally/login":                        {Post: operation},
-			"/finally/projects/{project}/tasks":     {Post: operation},
+			"/finally/projects/{project}/tasks":     {Get: operation, Post: operation},
 			"/finally/tasks/{projecttask}":          {Get: operation, Put: operation, Delete: operation},
 			"/finally/tasks/{projecttask}/complete": {Post: operation},
 		},

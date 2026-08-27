@@ -44,6 +44,14 @@ func RegisterFinallyRoutes(api huma.API) {
 		Security:      publicSecurity,
 	}, authLogin)
 	Register(api, huma.Operation{
+		OperationID: "finally-tasks-list",
+		Summary:     "List Finally tasks",
+		Description: "Returns the authenticated user's tasks in one project, paginated and flat.",
+		Method:      http.MethodGet,
+		Path:        "/finally/projects/{project}/tasks",
+		Tags:        tags,
+	}, projectTasksList)
+	Register(api, huma.Operation{
 		OperationID: "finally-tasks-create",
 		Summary:     "Create a Finally task",
 		Method:      http.MethodPost,
@@ -127,13 +135,13 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 		return nil, fmt.Errorf("build Finally client contract: required security schemes are missing")
 	}
 	login := source.Paths["/finally/login"]
-	create := source.Paths["/finally/projects/{project}/tasks"]
+	projectTasks := source.Paths["/finally/projects/{project}/tasks"]
 	task := source.Paths["/finally/tasks/{projecttask}"]
 	complete := source.Paths["/finally/tasks/{projecttask}/complete"]
 	calendarAccounts := source.Paths["/finally/calendar/accounts"]
 	calendarAccount := source.Paths["/finally/calendar/accounts/{account}"]
 	calendarContext := source.Paths["/finally/calendar/context"]
-	if login == nil || login.Post == nil || create == nil || create.Post == nil ||
+	if login == nil || login.Post == nil || projectTasks == nil || projectTasks.Get == nil || projectTasks.Post == nil ||
 		task == nil || task.Get == nil || task.Put == nil || task.Delete == nil ||
 		complete == nil || complete.Post == nil || calendarAccounts == nil ||
 		calendarAccounts.Post == nil || calendarAccounts.Get == nil || calendarAccount == nil ||
@@ -150,7 +158,8 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 			Post: login.Post,
 		},
 		"/finally/projects/{project}/tasks": {
-			Post: create.Post,
+			Get:  projectTasks.Get,
+			Post: projectTasks.Post,
 		},
 		"/finally/tasks/{projecttask}": {
 			Get:    task.Get,
