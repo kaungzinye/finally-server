@@ -20,7 +20,7 @@ The server listens on `http://localhost:3456` by default. Use a strong, deployme
 
 ## Versioned task API
 
-Finally iOS and automation clients use only the narrow `/api/v2/finally` surface. Sign in with `POST /api/v2/finally/login`, then send the returned JWT as `Authorization: Bearer <token>`. API tokens are also accepted according to their configured scopes.
+Finally iOS and automation clients use only the narrow `/api/v2/finally` API. Sign in with `POST /api/v2/finally/login`, then send the returned JWT as `Authorization: Bearer <token>`. API tokens are also accepted according to their configured scopes.
 
 The minimal task lifecycle uses these authenticated routes:
 
@@ -30,7 +30,7 @@ The minimal task lifecycle uses these authenticated routes:
 - `POST /api/v2/finally/tasks/{projecttask}/complete` completes a task.
 - `DELETE /api/v2/finally/tasks/{projecttask}` deletes a task.
 
-The matching machine-readable contract is served at `/api/v2/finally/openapi.json` and contains login, task lifecycle, and planning-context operations. The inherited web application and server administration continue to use the full `/api/v2` surface, documented at `/api/v2/openapi.json` with its local Scalar reference at `/api/v2/docs`. New client API work belongs under `/api/v2/finally`; inherited `/api/v1` routes remain frozen.
+The matching machine-readable contract is served at `/api/v2/finally/openapi.json` and contains login, task lifecycle, and planning-context operations. The inherited web application and server administration continue to use the full `/api/v2` API, documented at `/api/v2/openapi.json` with its local Scalar reference at `/api/v2/docs`. New client API work belongs under `/api/v2/finally`; inherited `/api/v1` routes remain frozen.
 
 ## Private calendar context
 
@@ -47,6 +47,21 @@ export VIKUNJA_CALENDAR_GOOGLE_CLIENTSECRET="google-client-secret"
 `POST /api/v2/finally/calendar/accounts` exchanges a Google authorization code, `GET /api/v2/finally/calendar/accounts` lists the current user's connections, and `DELETE /api/v2/finally/calendar/accounts/{account}` revokes one. `POST /api/v2/finally/calendar/context` fetches event descriptions and attendee context for a bounded planning window.
 
 Finally Server encrypts Google tokens with the stable calendar encryption key before writing them to Redis. Calendar event bodies remain request-scoped: the server returns them to the authenticated planning client without writing them to task storage, Redis, routine logs, or database backups. Calendar connection setup returns a recoverable service-unavailable response when durable Redis storage or stable encryption key material is not configured.
+
+## Project policies
+
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Governance](GOVERNANCE.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Upstream attribution](NOTICE)
+
+## License and source availability
+
+Finally Server retains Vikunja's AGPL-3.0-or-later license and upstream notices. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The `desktop/` directory carries its own GPL-3.0-or-later license.
+
+Operators who modify the server and make it available over a network must review section 13 of the AGPL and provide users access to the corresponding source as required by that license.
 
 ---
 
@@ -78,7 +93,7 @@ I'm also offering [a hosted version of Vikunja](https://vikunja.cloud/) if you w
 
 ## Security Reports
 
-If you find any security-related issues you don't want to disclose publicly, please use [the contact information on our website](https://vikunja.io/contact/#security).
+Report vulnerabilities introduced by Finally Server through [this fork's security policy](SECURITY.md). Report vulnerabilities in unmodified Vikunja code through [Vikunja's security contact](https://vikunja.io/contact/#security).
 
 ## Features
 
@@ -101,7 +116,7 @@ See [the roadmap](https://my.vikunja.cloud/share/QFyzYEmEYfSyQfTOmIRSwLUpkFjboaB
 
 ## Contributing
 
-Please check out the contribution guidelines on [the website](https://vikunja.io/docs/development/).
+Read this fork's [contribution guide](CONTRIBUTING.md). Send changes that apply to Vikunja in general to the [upstream project](https://github.com/go-vikunja/vikunja).
 
 ## License
 
