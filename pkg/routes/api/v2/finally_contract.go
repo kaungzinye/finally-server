@@ -135,13 +135,13 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 		return nil, fmt.Errorf("build Finally client contract: required security schemes are missing")
 	}
 	login := source.Paths["/finally/login"]
-	create := source.Paths["/finally/projects/{project}/tasks"]
+	projectTasks := source.Paths["/finally/projects/{project}/tasks"]
 	task := source.Paths["/finally/tasks/{projecttask}"]
 	complete := source.Paths["/finally/tasks/{projecttask}/complete"]
 	calendarAccounts := source.Paths["/finally/calendar/accounts"]
 	calendarAccount := source.Paths["/finally/calendar/accounts/{account}"]
 	calendarContext := source.Paths["/finally/calendar/context"]
-	if login == nil || login.Post == nil || create == nil || create.Get == nil || create.Post == nil ||
+	if login == nil || login.Post == nil || projectTasks == nil || projectTasks.Get == nil || projectTasks.Post == nil ||
 		task == nil || task.Get == nil || task.Put == nil || task.Delete == nil ||
 		complete == nil || complete.Post == nil || calendarAccounts == nil ||
 		calendarAccounts.Post == nil || calendarAccounts.Get == nil || calendarAccount == nil ||
@@ -158,8 +158,8 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 			Post: login.Post,
 		},
 		"/finally/projects/{project}/tasks": {
-			Get:  create.Get,
-			Post: create.Post,
+			Get:  projectTasks.Get,
+			Post: projectTasks.Post,
 		},
 		"/finally/tasks/{projecttask}": {
 			Get:    task.Get,
