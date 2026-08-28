@@ -1,0 +1,25 @@
+name: Finally CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: finally-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  finally:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build ./...
+      - name: Finally contract tests
+        run: go test ./pkg/routes/api/v2/...
+      - name: Finally web tests
+        run: go test ./pkg/webtests/ -run 'TestFinally'
