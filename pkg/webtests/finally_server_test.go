@@ -56,6 +56,9 @@ func TestFinallyServerOpenAPIContract(t *testing.T) {
 		"/finally/login": {
 			"post": {OperationID: "finally-auth-login"},
 		},
+		"/finally/projects": {
+			"get": {OperationID: "finally-projects-list"},
+		},
 		"/finally/projects/{project}/tasks": {
 			"get":  {OperationID: "finally-tasks-list"},
 			"post": {OperationID: "finally-tasks-create"},
@@ -84,6 +87,52 @@ func TestFinallyServerOpenAPIContract(t *testing.T) {
 	assert.Len(t, contract.Components.SecuritySchemes, 2)
 	assert.NotContains(t, contract.Components.Schemas, "AdminUser")
 	assert.NotContains(t, contract.Components.Schemas, "LinkShareToken")
+}
+
+func TestFinallyServerProjectDiscovery(t *testing.T) {
+	e, err := setupTestEnv()
+	require.NoError(t, err)
+
+	t.Run("login token discovers writable projects in the iOS response shape", func(t *testing.T) {
+		login := humaRequest(t, e, http.MethodPost, "/api/v2/finally/login", `{"username":"user1","password":"12345678"}`, "", "")
+		require.Equal(t, http.StatusOK, login.Code, "body: %s", login.Body.String())
+		var session struct {
+			Token string `json:"token"`
+		}
+		require.NoError(t, json.Unmarshal(login.Body.Bytes(), &session))
+		require.NotEmpty(t, session.Token)
+
+		rec := humaRequest(t, e, http.MethodGet, "/api/v2/finally/projects", "", session.Token, "")
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+		var projects []map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &projects))
+		projectTitles := make(map[int64]string, len(projects))
+		for _, project := range projects {
+			assert.Len(t, project, 2)
+			assert.Contains(t, project, "id")
+			assert.Contains(t, project, "title")
+			var id int64
+			var title string
+			require.NoError(t, json.Unmarshal(project["id"], &id))
+			require.NoError(t, json.Unmarshal(project["title"], &title))
+			projectTitles[id] = title
+		}
+		assert.Equal(t, "Test1", projectTitles[1])
+		assert.Equal(t, "Test10", projectTitles[10])
+		assert.NotContains(t, projectTitles, int64(9))
+	})
+
+	t.Run("returns an empty array when every accessible project is read only", func(t *testing.T) {
+		rec := humaRequest(t, e, http.MethodGet, "/api/v2/finally/projects", "", humaTokenFor(t, &testuser14), "")
+		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+		assert.JSONEq(t, `[]`, rec.Body.String())
+	})
+
+	t.Run("requires authentication", func(t *testing.T) {
+		rec := humaRequest(t, e, http.MethodGet, "/api/v2/finally/projects", "", "", "")
+		assert.Equal(t, http.StatusUnauthorized, rec.Code, "body: %s", rec.Body.String())
+	})
 }
 
 func TestFinallyServerFullOpenAPIUsesV2AuthenticationLinks(t *testing.T) {
