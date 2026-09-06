@@ -44,6 +44,14 @@ func RegisterFinallyRoutes(api huma.API) {
 		Security:      publicSecurity,
 	}, authLogin)
 	Register(api, huma.Operation{
+		OperationID: "finally-projects-list",
+		Summary:     "List writable Finally projects",
+		Description: "Returns the authenticated user's task-owning projects with write or admin permission in the compact shape used by Finally iOS.",
+		Method:      http.MethodGet,
+		Path:        "/finally/projects",
+		Tags:        tags,
+	}, finallyProjectsList)
+	Register(api, huma.Operation{
 		OperationID: "finally-tasks-list",
 		Summary:     "List Finally tasks",
 		Description: "Returns the authenticated user's tasks in one project, paginated and flat.",
@@ -135,13 +143,15 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 		return nil, fmt.Errorf("build Finally client contract: required security schemes are missing")
 	}
 	login := source.Paths["/finally/login"]
+	projects := source.Paths["/finally/projects"]
 	projectTasks := source.Paths["/finally/projects/{project}/tasks"]
 	task := source.Paths["/finally/tasks/{projecttask}"]
 	complete := source.Paths["/finally/tasks/{projecttask}/complete"]
 	calendarAccounts := source.Paths["/finally/calendar/accounts"]
 	calendarAccount := source.Paths["/finally/calendar/accounts/{account}"]
 	calendarContext := source.Paths["/finally/calendar/context"]
-	if login == nil || login.Post == nil || projectTasks == nil || projectTasks.Get == nil || projectTasks.Post == nil ||
+	if login == nil || login.Post == nil || projects == nil || projects.Get == nil ||
+		projectTasks == nil || projectTasks.Get == nil || projectTasks.Post == nil ||
 		task == nil || task.Get == nil || task.Put == nil || task.Delete == nil ||
 		complete == nil || complete.Post == nil || calendarAccounts == nil ||
 		calendarAccounts.Post == nil || calendarAccounts.Get == nil || calendarAccount == nil ||
@@ -156,6 +166,9 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 	paths := map[string]*huma.PathItem{
 		"/finally/login": {
 			Post: login.Post,
+		},
+		"/finally/projects": {
+			Get: projects.Get,
 		},
 		"/finally/projects/{project}/tasks": {
 			Get:  projectTasks.Get,
@@ -200,6 +213,39 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 		Components:        components,
 		Security:          source.Security,
 	}, nil
+}
+
+type finallyProject struct {
+	ID    int64  `json:"id" doc:"The project identifier."`
+	Title string `json:"title" doc:"The project title."`
+}
+
+type finallyProjectListBody struct {
+	Body []finallyProject
+}
+
+func finallyProjectsList(ctx context.Context, _ *struct{}) (*finallyProjectListBody, error) {
+	a, err := authFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, _, _, err := handler.DoReadAll(ctx, &models.Project{Expand: models.ProjectExpandableRights}, a, "", 1, -1)
+	if err != nil {
+		return nil, translateDomainError(err)
+	}
+	projects, ok := result.([]*models.Project)
+	if !ok {
+		return nil, fmt.Errorf("projects.ReadAll returned unexpected type %T (expected []*models.Project)", result)
+	}
+
+	writable := make([]finallyProject, 0, len(projects))
+	for _, project := range projects {
+		if project.ID <= 0 || project.MaxPermission < models.PermissionWrite {
+			continue
+		}
+		writable = append(writable, finallyProject{ID: project.ID, Title: project.Title})
+	}
+	return &finallyProjectListBody{Body: writable}, nil
 }
 
 type finallyComponentRef struct {
