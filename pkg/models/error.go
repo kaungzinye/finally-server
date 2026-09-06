@@ -2653,3 +2653,35 @@ func (err ErrUserDataExportDoesNotExist) HTTPError() web.HTTPError {
 		Message:  "No user data export found.",
 	}
 }
+
+// =================
+// Finally Daily Focus errors
+// =================
+
+// ErrFinallyDailyFocusDoesNotExist represents an error where no Daily Focus is stored for a project and day.
+type ErrFinallyDailyFocusDoesNotExist struct {
+	ProjectID int64
+	Day       string
+}
+
+// IsErrFinallyDailyFocusDoesNotExist checks if an error is ErrFinallyDailyFocusDoesNotExist.
+func IsErrFinallyDailyFocusDoesNotExist(err error) bool {
+	_, ok := err.(ErrFinallyDailyFocusDoesNotExist)
+	return ok
+}
+
+func (err ErrFinallyDailyFocusDoesNotExist) Error() string {
+	return fmt.Sprintf("No Daily Focus exists for this project and day [ProjectID: %d, Day: %s]", err.ProjectID, err.Day)
+}
+
+// ErrCodeFinallyDailyFocusDoesNotExist holds the unique world-error code of this error
+const ErrCodeFinallyDailyFocusDoesNotExist = 20001
+
+// HTTPError holds the http error description
+func (err ErrFinallyDailyFocusDoesNotExist) HTTPError() web.HTTPError {
+	return web.HTTPError{
+		HTTPCode: http.StatusNotFound,
+		Code:     ErrCodeFinallyDailyFocusDoesNotExist,
+		Message:  "No Daily Focus exists for this project and day.",
+	}
+}

@@ -80,6 +80,7 @@ func SetupTests() {
 		"totp",
 		"oauth_codes",
 		"notifications",
+		"finally_daily_focus",
 	)
 	if err != nil {
 		log.Fatal(err)

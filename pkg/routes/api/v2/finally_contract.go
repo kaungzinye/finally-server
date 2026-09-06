@@ -97,6 +97,7 @@ func RegisterFinallyRoutes(api huma.API) {
 		Tags:          tags,
 	}, finallyTasksComplete)
 	RegisterFinallyCalendarRoutes(api)
+	RegisterFinallyDailyFocusRoutes(api)
 
 	contract, err := finallyClientContract(api.OpenAPI())
 	if err != nil {
@@ -150,12 +151,14 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 	calendarAccounts := source.Paths["/finally/calendar/accounts"]
 	calendarAccount := source.Paths["/finally/calendar/accounts/{account}"]
 	calendarContext := source.Paths["/finally/calendar/context"]
+	dailyFocus := source.Paths["/finally/projects/{project}/daily-focus/{day}"]
 	if login == nil || login.Post == nil || projects == nil || projects.Get == nil ||
 		projectTasks == nil || projectTasks.Get == nil || projectTasks.Post == nil ||
 		task == nil || task.Get == nil || task.Put == nil || task.Delete == nil ||
 		complete == nil || complete.Post == nil || calendarAccounts == nil ||
 		calendarAccounts.Post == nil || calendarAccounts.Get == nil || calendarAccount == nil ||
-		calendarAccount.Delete == nil || calendarContext == nil || calendarContext.Post == nil {
+		calendarAccount.Delete == nil || calendarContext == nil || calendarContext.Post == nil ||
+		dailyFocus == nil || dailyFocus.Get == nil || dailyFocus.Put == nil {
 		return nil, fmt.Errorf("build Finally client contract: required lifecycle operation is missing")
 	}
 
@@ -191,6 +194,10 @@ func finallyClientContract(source *huma.OpenAPI) (*huma.OpenAPI, error) {
 		},
 		"/finally/calendar/context": {
 			Post: calendarContext.Post,
+		},
+		"/finally/projects/{project}/daily-focus/{day}": {
+			Get: dailyFocus.Get,
+			Put: dailyFocus.Put,
 		},
 	}
 	components, err := finallyClientComponents(source.Components, paths)
