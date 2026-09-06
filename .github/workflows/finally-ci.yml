@@ -17,9 +17,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - name: Install Mage
+        run: go install github.com/magefile/mage@v1.17.2
       - name: Build
-        run: go build ./...
-      - name: Finally contract tests
-        run: go test ./pkg/routes/api/v2/...
-      - name: Finally web tests
-        run: go test ./pkg/webtests/ -run 'TestFinally'
+        run: mage build
+      - name: Finally tests
+        run: mage test:filter 'TestFinally'
