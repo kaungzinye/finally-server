@@ -398,9 +398,13 @@ func (Test) Web(ctx context.Context) error {
 }
 
 func (Test) Filter(ctx context.Context, filter string) error {
-	mg.Deps(initVars)
+	mg.Deps(initVars, ensureFrontendDistExists)
 	// We run everything sequentially and not in parallel to prevent issues with real test databases
-	return runAndStreamOutput(ctx, "go", "test", goDetectVerboseFlag(), "-p", "1", "-timeout", "45m", "-run", filter, "-short", "./...")
+	if err := runAndStreamOutput(ctx, "go", "test", goDetectVerboseFlag(), "-p", "1", "-timeout", "45m", "-run", filter, "-short", "./..."); err != nil {
+		return err
+	}
+	// Web tests skip their entire suite in short mode, so run matching tests separately.
+	return runAndStreamOutput(ctx, "go", "test", goDetectVerboseFlag(), "-p", "1", "-timeout", "45m", "-run", filter, "./pkg/webtests")
 }
 
 func (Test) All() {

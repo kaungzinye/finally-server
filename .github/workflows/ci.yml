@@ -23,12 +23,15 @@ concurrency:
 jobs:
   test:
     name: Test
+    if: github.repository == 'go-vikunja/vikunja'
     uses: ./.github/workflows/test.yml
     secrets: inherit
 
   release:
     name: Release
-    if: ${{ github.ref_type == 'tag' || github.ref_name == 'main' }}
+    if: ${{ github.repository == 'go-vikunja/vikunja' && (github.ref_type == 'tag' || github.ref_name == 'main') }}
+    permissions:
+      contents: write
     uses: ./.github/workflows/release.yml
     needs:
       - test
