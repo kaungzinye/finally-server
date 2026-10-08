@@ -65,10 +65,18 @@ func newGoogleCalendarDouble(t *testing.T) *googleCalendarDouble {
 			if code == "expired" {
 				expiresIn = -60
 			}
-			_, _ = fmt.Fprintf(w, `{"access_token":"access-%s","refresh_token":"refresh-%s","expires_in":%d}`, code, code, expiresIn)
+			assert.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+				"access_token":  "access-" + code,
+				"refresh_token": "refresh-" + code,
+				"expires_in":    expiresIn,
+			}))
 		case "/oauth2/v2/userinfo":
 			code := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer access-")
-			_, _ = fmt.Fprintf(w, `{"id":"google-%s","email":"%s@example.com","name":"%s account"}`, code, code, code)
+			assert.NoError(t, json.NewEncoder(w).Encode(map[string]string{
+				"id":    "google-" + code,
+				"email": code + "@example.com",
+				"name":  code + " account",
+			}))
 		case "/revoke":
 			if err := r.ParseForm(); err != nil {
 				t.Errorf("parse revoke form: %v", err)

@@ -18,6 +18,12 @@ mage build
 
 The server listens on `http://localhost:3456` by default. Use a strong, deployment-specific service secret outside local development.
 
+## Server checks
+
+Run `mage build` and `mage test:filter 'TestFinally'` before merging server changes. The filtered test command runs both the short feature tests and the matching HTTP integration tests, including authentication, task lifecycle, calendar context, and Daily Focus. Finally CI runs these same checks on pull requests and pushes to `main`.
+
+The inherited Vikunja CI/release, Crowdin sync, and automatic labeling workflows run only in `go-vikunja/vikunja`; they depend on upstream infrastructure, credentials, and labels.
+
 ## Versioned task API
 
 Finally iOS and automation clients use only the narrow `/api/v2/finally` API. Sign in with `POST /api/v2/finally/login`, then send the returned JWT as `Authorization: Bearer <token>`. API tokens are also accepted according to their configured scopes.
