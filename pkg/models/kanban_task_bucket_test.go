@@ -461,3 +461,18 @@ func TestTaskBucket_Update(t *testing.T) {
 		}()
 	})
 }
+
+func TestFinallyTaskBucketProtectsCompletion(t *testing.T) {
+	db.LoadAndAssertFixtures(t)
+	s := db.NewSession()
+	defer s.Close()
+	_, err := s.ID(1).Cols("finally_revision").Update(&Task{FinallyRevision: 1})
+	require.NoError(t, err)
+	blocked := &TaskBucket{TaskID: 1, BucketID: 3, ProjectViewID: 4, ProjectID: 1}
+	require.Error(t, blocked.Update(s, &user.User{ID: 1}))
+	stored, err := GetTaskByIDSimple(s, 1)
+	require.NoError(t, err)
+	assert.False(t, stored.Done)
+	allowed := &TaskBucket{TaskID: 1, BucketID: 1, ProjectViewID: 4, ProjectID: 1}
+	require.NoError(t, allowed.Update(s, &user.User{ID: 1}))
+}

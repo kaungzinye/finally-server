@@ -31,8 +31,9 @@ import (
 // A task can only appear once per project view which is ensured by a
 // unique index on the combination of task_id and project_view_id.
 type TaskBucket struct {
-	BucketID int64   `xorm:"bigint not null index" json:"bucket_id" param:"bucket" doc:"The bucket to move the task into. On /api/v2 this is taken from the URL; a value in the body is ignored."`
-	Bucket   *Bucket `xorm:"-" json:"bucket" readOnly:"true" doc:"The resolved target bucket, including its updated task count."`
+	conditionalFinallyWrite bool    `xorm:"-" json:"-"`
+	BucketID                int64   `xorm:"bigint not null index" json:"bucket_id" param:"bucket" doc:"The bucket to move the task into. On /api/v2 this is taken from the URL; a value in the body is ignored."`
+	Bucket                  *Bucket `xorm:"-" json:"bucket" readOnly:"true" doc:"The resolved target bucket, including its updated task count."`
 	// The task which belongs to the bucket. Together with ProjectViewID
 	// this field is part of a unique index to prevent duplicates.
 	TaskID int64 `xorm:"bigint not null index unique(task_view)" json:"task_id" doc:"The id of the task to place in the bucket."`
@@ -161,6 +162,9 @@ func updateTaskBucket(s *xorm.Session, a web.Auth, b *TaskBucket) (err error) {
 	}
 
 	if doneChanged {
+		if err := validateFinallyBucketCompletion(task, b); err != nil {
+			return err
+		}
 		if task.Done {
 			task.DoneAt = time.Now()
 		} else {
@@ -248,6 +252,13 @@ func (b *TaskBucket) Update(s *xorm.Session, a web.Auth) (err error) {
 			Task: b.Task,
 			Doer: doerFromAuth(s, a),
 		})
+	}
+	return nil
+}
+
+func validateFinallyBucketCompletion(task *Task, bucket *TaskBucket) error {
+	if task.FinallyRevision > 0 && !bucket.conditionalFinallyWrite {
+		return InvalidFieldErrorWithMessage([]string{"revision"}, "Use the conditional Finally task endpoint to change completion")
 	}
 	return nil
 }

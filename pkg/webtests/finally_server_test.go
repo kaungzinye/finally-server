@@ -220,27 +220,27 @@ func TestFinallyServerAuthenticatedTaskLifecycle(t *testing.T) {
 	require.Equal(t, http.StatusOK, read.Code, "body: %s", read.Body.String())
 	assert.Equal(t, "Plan tomorrow", decodeTask(read.Body.Bytes()).Title)
 
-	updated := humaRequest(t, e, http.MethodPut, taskPath, `{"title":"Plan focused tomorrow"}`, token, "")
+	updated := humaRequest(t, e, http.MethodPut, taskPath, `{"base_revision":1,"client":"phone","fields":{"title":"Plan focused tomorrow"}}`, token, "")
 	require.Equal(t, http.StatusOK, updated.Code, "body: %s", updated.Body.String())
 	task = decodeTask(updated.Body.Bytes())
 	assert.Equal(t, "Plan focused tomorrow", task.Title)
 	assert.False(t, task.Done)
 
-	completed := humaRequest(t, e, http.MethodPost, taskPath+"/complete", "", token, "")
+	completed := humaRequest(t, e, http.MethodPost, taskPath+"/complete?base_revision=2&client=phone", "", token, "")
 	require.Equal(t, http.StatusOK, completed.Code, "body: %s", completed.Body.String())
 	task = decodeTask(completed.Body.Bytes())
 	assert.Equal(t, "Plan focused tomorrow", task.Title)
 	assert.True(t, task.Done)
 	assert.NotEmpty(t, task.DoneAt)
 
-	deleted := humaRequest(t, e, http.MethodDelete, taskPath, "", token, "")
+	deleted := humaRequest(t, e, http.MethodDelete, taskPath+"?base_revision=3&client=phone", "", token, "")
 	require.Equal(t, http.StatusNoContent, deleted.Code, "body: %s", deleted.Body.String())
 	assert.Empty(t, deleted.Body.String())
 
 	missing := humaRequest(t, e, http.MethodGet, taskPath, "", token, "")
 	assert.Equal(t, http.StatusNotFound, missing.Code, "body: %s", missing.Body.String())
 
-	missingCompletion := humaRequest(t, e, http.MethodPost, taskPath+"/complete", "", token, "")
+	missingCompletion := humaRequest(t, e, http.MethodPost, taskPath+"/complete?base_revision=3&client=phone", "", token, "")
 	assert.Equal(t, http.StatusNotFound, missingCompletion.Code, "body: %s", missingCompletion.Body.String())
 }
 
@@ -257,9 +257,9 @@ func TestFinallyServerTaskLifecycleRequiresAuthentication(t *testing.T) {
 		{name: "list", method: http.MethodGet, path: "/api/v2/finally/projects/1/tasks"},
 		{name: "create", method: http.MethodPost, path: "/api/v2/finally/projects/1/tasks", body: `{"title":"Unauthorized"}`},
 		{name: "read", method: http.MethodGet, path: "/api/v2/finally/tasks/1"},
-		{name: "update", method: http.MethodPut, path: "/api/v2/finally/tasks/1", body: `{"title":"Unauthorized"}`},
-		{name: "complete", method: http.MethodPost, path: "/api/v2/finally/tasks/1/complete"},
-		{name: "delete", method: http.MethodDelete, path: "/api/v2/finally/tasks/1"},
+		{name: "update", method: http.MethodPut, path: "/api/v2/finally/tasks/1", body: `{"base_revision":0,"client":"api","fields":{"title":"Unauthorized"}}`},
+		{name: "complete", method: http.MethodPost, path: "/api/v2/finally/tasks/1/complete?base_revision=0&client=api"},
+		{name: "delete", method: http.MethodDelete, path: "/api/v2/finally/tasks/1?base_revision=0&client=api"},
 	}
 
 	for _, tt := range tests {
@@ -284,9 +284,9 @@ func TestFinallyServerTaskLifecycleRequiresPermission(t *testing.T) {
 		{name: "list", method: http.MethodGet, path: "/api/v2/finally/projects/1/tasks"},
 		{name: "create", method: http.MethodPost, path: "/api/v2/finally/projects/1/tasks", body: `{"title":"Forbidden"}`},
 		{name: "read", method: http.MethodGet, path: "/api/v2/finally/tasks/1"},
-		{name: "update", method: http.MethodPut, path: "/api/v2/finally/tasks/1", body: `{"title":"Forbidden"}`},
-		{name: "complete", method: http.MethodPost, path: "/api/v2/finally/tasks/1/complete"},
-		{name: "delete", method: http.MethodDelete, path: "/api/v2/finally/tasks/1"},
+		{name: "update", method: http.MethodPut, path: "/api/v2/finally/tasks/1", body: `{"base_revision":0,"client":"api","fields":{"title":"Forbidden"}}`},
+		{name: "complete", method: http.MethodPost, path: "/api/v2/finally/tasks/1/complete?base_revision=0&client=api"},
+		{name: "delete", method: http.MethodDelete, path: "/api/v2/finally/tasks/1?base_revision=0&client=api"},
 	}
 
 	for _, tt := range tests {
