@@ -54,6 +54,12 @@ func finallyTasksCreate(ctx context.Context, in *struct {
 	Project int64 `path:"project"`
 	Body    models.Task
 }) (*singleBody[models.Task], error) {
+	if err := models.ValidateFinallyTask(&in.Body); err != nil {
+		return nil, translateDomainError(err)
+	}
+	if in.Body.ReminderRules == nil {
+		in.Body.ReminderRules = []models.FinallyReminderRule{}
+	}
 	in.Body.FinallyRevision = 1
 	in.Body.FinallyFieldVersions = nil
 	return tasksCreate(ctx, &struct {

@@ -65,6 +65,8 @@ type Task struct {
 	finallyRevisionClaimed bool                           `xorm:"-" json:"-"`
 	FinallyRevision        int64                          `xorm:"bigint not null default 0" json:"revision" readOnly:"true" doc:"Conditional-write revision for the Finally task contract."`
 	FinallyFieldVersions   map[string]FinallyFieldVersion `xorm:"JSON" json:"-"`
+	ReminderRules          []FinallyReminderRule          `xorm:"JSON" json:"reminder_rules" doc:"Canonical rules resolved and scheduled by each phone."`
+	DeadlineHasTime        bool                           `xorm:"not null default false" json:"deadline_has_time" doc:"Whether the deadline includes a time."`
 
 	// The unique, numeric id of this task.
 	ID int64 `xorm:"bigint autoincr not null unique pk" json:"id" param:"projecttask" readOnly:"true" doc:"The unique, numeric id of this task."`
@@ -681,6 +683,9 @@ func addMoreInfoToTasks(s *xorm.Session, taskMap map[int64]*Task, a web.Auth, vi
 	var taskIDs []int64
 	var projectIDs []int64
 	for _, i := range taskMap {
+		if i.ReminderRules == nil {
+			i.ReminderRules = []FinallyReminderRule{}
+		}
 		taskIDs = append(taskIDs, i.ID)
 		if i.CreatedByID != 0 {
 			userIDs = append(userIDs, i.CreatedByID)

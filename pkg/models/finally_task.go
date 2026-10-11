@@ -25,6 +25,7 @@ import (
 
 	"code.vikunja.io/api/pkg/web"
 
+	"github.com/google/uuid"
 	"xorm.io/xorm"
 )
 
@@ -32,6 +33,43 @@ type FinallyFieldVersion struct {
 	Revision int64  `json:"revision"`
 	Client   string `json:"client"`
 }
+
+type FinallyReminderRule struct {
+	ID        string     `json:"id" doc:"Stable UUID identifying this rule across phones."`
+	Kind      string     `json:"kind" enum:"anchored,exact" doc:"Anchored rules move with their anchor; exact rules keep their timestamp."`
+	Anchor    string     `json:"anchor,omitempty" enum:"deadline,plannedDay" doc:"Task date used by an anchored rule."`
+	Value     int        `json:"value,omitempty" doc:"Positive offset in the selected unit."`
+	Unit      string     `json:"unit,omitempty" enum:"minutes,hours,days,weeks,months" doc:"Calendar unit of the offset."`
+	Direction string     `json:"direction,omitempty" enum:"before,after" doc:"Offset direction relative to the anchor."`
+	At        *time.Time `json:"at,omitempty" doc:"Fixed timestamp for an exact rule."`
+}
+
+func validateFinallyReminderRules(rules []FinallyReminderRule) error {
+	seen := map[string]bool{}
+	bounds := map[string]int{"minutes": 59, "hours": 23, "days": 30, "weeks": 51, "months": 11}
+	for _, rule := range rules {
+		parsed, err := uuid.Parse(rule.ID)
+		if err != nil || parsed.String() != strings.ToLower(rule.ID) || seen[parsed.String()] {
+			return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Each reminder rule needs a unique UUID")
+		}
+		seen[parsed.String()] = true
+		switch rule.Kind {
+		case "exact":
+			if rule.At == nil || rule.At.IsZero() || rule.Anchor != "" || rule.Value != 0 || rule.Unit != "" || rule.Direction != "" {
+				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Exact rules require only a fixed timestamp")
+			}
+		case "anchored":
+			if (rule.Anchor != "deadline" && rule.Anchor != "plannedDay") || rule.Value < 1 || rule.Value > bounds[rule.Unit] || (rule.Direction != "before" && rule.Direction != "after") || rule.At != nil {
+				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Anchored rules require a valid anchor and calendar offset")
+			}
+		default:
+			return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Reminder kind must be anchored or exact")
+		}
+	}
+	return nil
+}
+
+func ValidateFinallyTask(t *Task) error { return validateFinallyReminderRules(t.ReminderRules) }
 
 type FinallyTaskConflict struct {
 	Current *Task
@@ -45,6 +83,7 @@ func (e *FinallyTaskConflict) Error() string {
 func finallyConflictFields(t *Task, base int64, client string, fields []string) []string {
 	conflicts := []string{}
 	for _, field := range fields {
+		field = finallyFieldKey(field)
 		version := t.FinallyFieldVersions[field]
 		if base > t.FinallyRevision || (version.Revision > base && (client != "phone" || version.Client == "phone")) {
 			conflicts = append(conflicts, field)
@@ -62,7 +101,7 @@ func (t *Task) claimFinallyRevision(s *xorm.Session, fields []string, client str
 		t.FinallyFieldVersions = map[string]FinallyFieldVersion{}
 	}
 	for _, field := range fields {
-		t.FinallyFieldVersions[field] = FinallyFieldVersion{Revision: t.FinallyRevision, Client: client}
+		t.FinallyFieldVersions[finallyFieldKey(field)] = FinallyFieldVersion{Revision: t.FinallyRevision, Client: client}
 	}
 	affected, err := s.ID(t.ID).Where("finally_revision = ?", old).Cols("finally_revision", "finally_field_versions").Update(t)
 	if err != nil {
@@ -92,6 +131,7 @@ func (t *Task) PatchFinally(s *xorm.Session, a web.Auth, base int64, client stri
 		return &FinallyTaskConflict{Current: t, Fields: conflicts}
 	}
 	core := []string{}
+	metadata := []string{}
 	for _, field := range fields {
 		raw := patch[field]
 		if string(raw) == "null" && field != "start_date" && field != "due_date" {
@@ -122,6 +162,12 @@ func (t *Task) PatchFinally(s *xorm.Session, a web.Auth, base int64, client stri
 			t.DueDate = time.Time{}
 			err = json.Unmarshal(raw, &t.DueDate)
 			core = append(core, field)
+		case "deadline_has_time":
+			err = json.Unmarshal(raw, &t.DeadlineHasTime)
+			metadata = append(metadata, field)
+		case "reminder_rules":
+			err = json.Unmarshal(raw, &t.ReminderRules)
+			metadata = append(metadata, field)
 		default:
 			err = fmt.Errorf("unsupported task field")
 		}
@@ -129,8 +175,16 @@ func (t *Task) PatchFinally(s *xorm.Session, a web.Auth, base int64, client stri
 			return InvalidFieldErrorWithMessage([]string{field}, err.Error())
 		}
 	}
+	if err := ValidateFinallyTask(t); err != nil {
+		return err
+	}
 	if err := t.claimFinallyRevision(s, fields, client); err != nil {
 		return err
+	}
+	if len(metadata) > 0 {
+		if _, err := s.ID(t.ID).Cols(metadata...).Update(t); err != nil {
+			return err
+		}
 	}
 	if len(core) > 0 {
 		if err := t.updateSingleTask(s, a, core); err != nil {
@@ -151,4 +205,11 @@ func (t *Task) DeleteFinally(s *xorm.Session, a web.Auth, base int64, client str
 		return err
 	}
 	return t.Delete(s, a)
+}
+
+func finallyFieldKey(field string) string {
+	if field == "deadline_has_time" {
+		return "due_date"
+	}
+	return field
 }
