@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -34,6 +35,10 @@ const FinallyContractPath = "/finally/openapi.json"
 
 func RegisterFinallyRoutes(api huma.API) {
 	tags := []string{"finally"}
+	conflictResponses := map[string]*huma.Response{"409": {
+		Description: "Review the accepted task and conflicting fields, then submit an explicit decision against its revision.",
+		Content:     map[string]*huma.MediaType{"application/problem+json": {Schema: api.OpenAPI().Components.Schemas.Schema(reflect.TypeOf(finallyConflictResponse{}), true, "FinallyTaskConflict")}},
+	}}
 	Register(api, huma.Operation{
 		OperationID:   "finally-auth-login",
 		Summary:       "Login to Finally",
@@ -65,7 +70,7 @@ func RegisterFinallyRoutes(api huma.API) {
 		Method:      http.MethodPost,
 		Path:        "/finally/projects/{project}/tasks",
 		Tags:        tags,
-	}, tasksCreate)
+	}, finallyTasksCreate)
 	Register(api, huma.Operation{
 		OperationID: "finally-tasks-read",
 		Summary:     "Get a Finally task",
@@ -75,22 +80,28 @@ func RegisterFinallyRoutes(api huma.API) {
 	}, tasksRead)
 	Register(api, huma.Operation{
 		OperationID: "finally-tasks-update",
+		Metadata:    map[string]any{"autopatch": false},
 		Summary:     "Update a Finally task",
+		Description: "Applies a narrow conditional field patch. Explicit phone edits take priority over concurrent API edits; conflicts return the accepted task and conflicting_fields.",
+		Responses:   conflictResponses,
 		Method:      http.MethodPut,
 		Path:        "/finally/tasks/{projecttask}",
 		Tags:        tags,
-	}, tasksUpdate)
+	}, finallyTasksUpdate)
 	Register(api, huma.Operation{
 		OperationID: "finally-tasks-delete",
 		Summary:     "Delete a Finally task",
+		Description: "Deletes the task only when base_revision equals its current revision. A stale deletion returns 409 with current and conflicting_fields.",
+		Responses:   conflictResponses,
 		Method:      http.MethodDelete,
 		Path:        "/finally/tasks/{projecttask}",
 		Tags:        tags,
-	}, tasksDelete)
+	}, finallyTasksDelete)
 	Register(api, huma.Operation{
 		OperationID:   "finally-tasks-complete",
+		Responses:     conflictResponses,
 		Summary:       "Complete a Finally task",
-		Description:   "Marks the task complete while preserving every other task field.",
+		Description:   "Conditionally completes the task against base_revision. Completion conflicts return 409 with current and conflicting_fields.",
 		Method:        http.MethodPost,
 		Path:          "/finally/tasks/{projecttask}/complete",
 		DefaultStatus: http.StatusOK,
@@ -445,28 +456,4 @@ func copyFinallyComponent(target, source *huma.Components, ref finallyComponentR
 	default:
 		return nil, false
 	}
-}
-
-func finallyTasksComplete(ctx context.Context, in *struct {
-	ID int64 `path:"projecttask" doc:"The numeric id of the task to complete."`
-}) (*singleBody[models.Task], error) {
-	a, err := authFromCtx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := handler.DoReadOne(ctx, &models.Task{ID: in.ID}, a); err != nil {
-		return nil, translateDomainError(err)
-	}
-	update := &models.BulkTask{
-		TaskIDs: []int64{in.ID},
-		Fields:  []string{"done"},
-		Values:  &models.Task{Done: true},
-	}
-	if err := handler.DoUpdate(ctx, update, a); err != nil {
-		return nil, translateDomainError(err)
-	}
-	if len(update.Tasks) != 1 {
-		return nil, huma.Error500InternalServerError("completion returned an unexpected task count")
-	}
-	return &singleBody[models.Task]{Body: update.Tasks[0]}, nil
 }

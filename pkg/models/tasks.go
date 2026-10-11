@@ -62,6 +62,10 @@ func validateRepeatAfter(repeatAfter int64) error {
 
 // Task represents a task in a project
 type Task struct {
+	finallyRevisionClaimed bool                           `xorm:"-" json:"-"`
+	FinallyRevision        int64                          `xorm:"bigint not null default 0" json:"revision" readOnly:"true" doc:"Conditional-write revision for the Finally task contract."`
+	FinallyFieldVersions   map[string]FinallyFieldVersion `xorm:"JSON" json:"-"`
+
 	// The unique, numeric id of this task.
 	ID int64 `xorm:"bigint autoincr not null unique pk" json:"id" param:"projecttask" readOnly:"true" doc:"The unique, numeric id of this task."`
 	// The task text. This is what you'll see in the project.
@@ -1136,6 +1140,10 @@ func (t *Task) updateSingleTask(s *xorm.Session, a web.Auth, fields []string) (e
 		t.ProjectID = ot.ProjectID
 	}
 
+	if ot.FinallyRevision > 0 && !t.finallyRevisionClaimed {
+		return InvalidFieldErrorWithMessage([]string{"revision"}, "Use the conditional Finally task endpoint to edit this task")
+	}
+
 	// Get the stored reminders
 	reminders, err := getRemindersForTasks(s, []int64{t.ID})
 	if err != nil {
@@ -1276,10 +1284,11 @@ func (t *Task) updateSingleTask(s *xorm.Session, a web.Auth, fields []string) (e
 			}
 
 			tb := &TaskBucket{
-				BucketID:      bucketID,
-				TaskID:        t.ID,
-				ProjectViewID: view.ID,
-				ProjectID:     t.ProjectID,
+				conditionalFinallyWrite: t.finallyRevisionClaimed,
+				BucketID:                bucketID,
+				TaskID:                  t.ID,
+				ProjectViewID:           view.ID,
+				ProjectID:               t.ProjectID,
 			}
 			err = updateTaskBucket(s, a, tb)
 			if err != nil {
@@ -1513,10 +1522,11 @@ func (t *Task) moveTaskToDoneBuckets(s *xorm.Session, a web.Auth, views []*Proje
 		}
 
 		tb := &TaskBucket{
-			BucketID:      bucketID,
-			TaskID:        t.ID,
-			ProjectViewID: view.ID,
-			ProjectID:     t.ProjectID,
+			conditionalFinallyWrite: t.finallyRevisionClaimed,
+			BucketID:                bucketID,
+			TaskID:                  t.ID,
+			ProjectViewID:           view.ID,
+			ProjectID:               t.ProjectID,
 		}
 		err = updateTaskBucket(s, a, tb)
 		if err != nil {
@@ -1547,10 +1557,11 @@ func (t *Task) moveTaskToDefaultBuckets(s *xorm.Session, a web.Auth, views []*Pr
 	for _, view := range views {
 		if view.DefaultBucketID != 0 {
 			tb := &TaskBucket{
-				BucketID:      view.DefaultBucketID,
-				TaskID:        t.ID,
-				ProjectViewID: view.ID,
-				ProjectID:     t.ProjectID,
+				conditionalFinallyWrite: t.finallyRevisionClaimed,
+				BucketID:                view.DefaultBucketID,
+				TaskID:                  t.ID,
+				ProjectViewID:           view.ID,
+				ProjectID:               t.ProjectID,
 			}
 			if err := updateTaskBucket(s, a, tb); err != nil {
 				return err
@@ -1890,6 +1901,13 @@ func updateTaskLastUpdated(s *xorm.Session, task *Task) error {
 // @Failure 500 {object} models.Message "Internal error"
 // @Router /tasks/{id} [delete]
 func (t *Task) Delete(s *xorm.Session, a web.Auth) (err error) {
+	stored, err := GetTaskByIDSimple(s, t.ID)
+	if err != nil {
+		return err
+	}
+	if stored.FinallyRevision > 0 && !t.finallyRevisionClaimed {
+		return InvalidFieldErrorWithMessage([]string{"revision"}, "Use the conditional Finally task endpoint to delete this task")
+	}
 
 	// duplicate the task for the event
 	fullTask := &Task{ID: t.ID}
