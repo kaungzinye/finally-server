@@ -35,18 +35,19 @@ type FinallyFieldVersion struct {
 }
 
 type FinallyReminderRule struct {
-	ID        string     `json:"id" doc:"Stable UUID identifying this rule across phones."`
-	Kind      string     `json:"kind" enum:"anchored,exact" doc:"Anchored rules move with their anchor; exact rules keep their timestamp."`
-	Anchor    string     `json:"anchor,omitempty" enum:"deadline,plannedDay" doc:"Task date used by an anchored rule."`
-	Value     int        `json:"value,omitempty" doc:"Positive offset in the selected unit."`
-	Unit      string     `json:"unit,omitempty" enum:"minutes,hours,days,weeks,months" doc:"Calendar unit of the offset."`
-	Direction string     `json:"direction,omitempty" enum:"before,after" doc:"Offset direction relative to the anchor."`
-	At        *time.Time `json:"at,omitempty" doc:"Fixed timestamp for an exact rule."`
+	ID     string     `json:"id" doc:"Stable UUID identifying this rule across phones."`
+	Kind   string     `json:"kind" enum:"deadline,exact" doc:"Deadline rules count down to the task's deadline. Exact rules fire once at a fixed instant."`
+	Offset string     `json:"offset,omitempty" enum:"morningOf,daysBefore,weeksBefore,hourBefore" doc:"When a deadline rule fires relative to the deadline."`
+	Value  *int       `json:"value,omitempty" doc:"Days for daysBefore (1 to 30) or weeks for weeksBefore (1 to 12)."`
+	At     *time.Time `json:"at,omitempty" doc:"RFC3339 instant for an exact rule."`
 }
+
+// A zero maximum marks an offset that carries no value.
+var finallyDeadlineOffsetMaxValues = map[string]int{"morningOf": 0, "daysBefore": 30, "weeksBefore": 12, "hourBefore": 0}
 
 func validateFinallyReminderRules(rules []FinallyReminderRule) error {
 	seen := map[string]bool{}
-	bounds := map[string]int{"minutes": 59, "hours": 23, "days": 30, "weeks": 51, "months": 11}
+	deadlines := map[string]bool{}
 	for _, rule := range rules {
 		parsed, err := uuid.Parse(rule.ID)
 		if err != nil || parsed.String() != strings.ToLower(rule.ID) || seen[parsed.String()] {
@@ -55,15 +56,28 @@ func validateFinallyReminderRules(rules []FinallyReminderRule) error {
 		seen[parsed.String()] = true
 		switch rule.Kind {
 		case "exact":
-			if rule.At == nil || rule.At.IsZero() || rule.Anchor != "" || rule.Value != 0 || rule.Unit != "" || rule.Direction != "" {
+			if rule.At == nil || rule.At.IsZero() || rule.Offset != "" || rule.Value != nil {
 				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Exact rules require only a fixed timestamp")
 			}
-		case "anchored":
-			if (rule.Anchor != "deadline" && rule.Anchor != "plannedDay") || rule.Value < 1 || rule.Value > bounds[rule.Unit] || (rule.Direction != "before" && rule.Direction != "after") || rule.At != nil {
-				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Anchored rules require a valid anchor and calendar offset")
+		case "deadline":
+			maxValue, known := finallyDeadlineOffsetMaxValues[rule.Offset]
+			valueValid := rule.Value == nil
+			if maxValue > 0 {
+				valueValid = rule.Value != nil && *rule.Value >= 1 && *rule.Value <= maxValue
 			}
+			if !known || !valueValid || rule.At != nil {
+				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Deadline rules require a known offset and its value range")
+			}
+			key := rule.Offset
+			if rule.Value != nil {
+				key = fmt.Sprintf("%s %d", rule.Offset, *rule.Value)
+			}
+			if deadlines[key] {
+				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "A task holds one deadline rule per offset and value")
+			}
+			deadlines[key] = true
 		default:
-			return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Reminder kind must be anchored or exact")
+			return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Reminder kind must be deadline or exact")
 		}
 	}
 	return nil
@@ -166,6 +180,8 @@ func (t *Task) PatchFinally(s *xorm.Session, a web.Auth, base int64, client stri
 			err = json.Unmarshal(raw, &t.DeadlineHasTime)
 			metadata = append(metadata, field)
 		case "reminder_rules":
+			// A fresh slice keeps stored rules from leaking fields into the replacement.
+			t.ReminderRules = nil
 			err = json.Unmarshal(raw, &t.ReminderRules)
 			metadata = append(metadata, field)
 		default:

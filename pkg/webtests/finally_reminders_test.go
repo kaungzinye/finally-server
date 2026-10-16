@@ -30,7 +30,18 @@ func TestFinallyCanonicalReminderRules(t *testing.T) {
 	e, err := setupTestEnv()
 	require.NoError(t, err)
 	token := humaTokenFor(t, &testuser1)
-	rules := `[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"anchored","anchor":"deadline","value":30,"unit":"minutes","direction":"before"},{"id":"39082ea0-f135-494a-b73c-c32b77eb8f00","kind":"exact","at":"2026-10-20T17:30:00.125+08:00"}]`
+	rules := `[` +
+		`{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"deadline","offset":"morningOf"},` +
+		`{"id":"5d0f8f0e-3c47-4c1b-9a43-2f6f0d1f6a10","kind":"deadline","offset":"daysBefore","value":1},` +
+		`{"id":"9e1c3a52-7b0d-4f6e-8d21-6a4b5c3e2f01","kind":"deadline","offset":"daysBefore","value":30},` +
+		`{"id":"c2a7e4d9-1f35-4b80-a6c2-0e9d8b7f5a34","kind":"deadline","offset":"weeksBefore","value":12},` +
+		`{"id":"e8b4f1a6-2d93-4c57-b0e1-7f3a9c6d4b28","kind":"deadline","offset":"hourBefore"},` +
+		`{"id":"39082ea0-f135-494a-b73c-c32b77eb8f00","kind":"exact","at":"2026-10-20T15:00:00.125Z"}]`
+	decodeRules := func(rules string) []map[string]interface{} {
+		var out []map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(rules), &out))
+		return out
+	}
 	type task struct {
 		ID              int64                    `json:"id"`
 		Revision        int64                    `json:"revision"`
@@ -43,7 +54,7 @@ func TestFinallyCanonicalReminderRules(t *testing.T) {
 	created := humaRequest(t, e, http.MethodPost, "/api/v2/finally/projects/1/tasks", `{"title":"Proposal","due_date":"2026-10-20T18:00:00Z","deadline_has_time":true,"reminder_rules":`+rules+`}`, token, "")
 	require.Equal(t, 201, created.Code, created.Body.String())
 	original := decode(created.Body.Bytes())
-	assert.Len(t, original.Rules, 2)
+	assert.Equal(t, decodeRules(rules), original.Rules)
 	assert.True(t, original.DeadlineHasTime)
 	path := fmt.Sprintf("/api/v2/finally/tasks/%d", original.ID)
 	read := humaRequest(t, e, http.MethodGet, path, "", token, "")
@@ -63,24 +74,53 @@ func TestFinallyCanonicalReminderRules(t *testing.T) {
 	// Deadline precision and its value share field ownership.
 	stale := humaRequest(t, e, http.MethodPut, path, fmt.Sprintf(`{"base_revision":%d,"client":"api","fields":{"deadline_has_time":true}}`, original.Revision), token, "")
 	assert.Equal(t, 409, stale.Code, stale.Body.String())
-	title := patch(moved.Revision, `{"title":"Retain rules"}`, 200)
+	// Reminder rules have their own field ownership, so the deadline move leaves a stale rule write clean.
+	kept := humaRequest(t, e, http.MethodPut, path, fmt.Sprintf(`{"base_revision":%d,"client":"api","fields":{"reminder_rules":%s}}`, original.Revision, rules), token, "")
+	require.Equal(t, 200, kept.Code, kept.Body.String())
+	title := patch(decode(kept.Body.Bytes()).Revision, `{"title":"Retain rules"}`, 200)
 	assert.Equal(t, original.Rules, title.Rules)
 	completed := patch(title.Revision, `{"done":true}`, 200)
 	assert.True(t, completed.Done)
 	assert.Equal(t, original.Rules, completed.Rules)
+	// A replacement stores exactly the sent shapes, whatever each position held before.
+	replacement := `[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"exact","at":"2026-10-21T08:00:00Z"},{"id":"5d0f8f0e-3c47-4c1b-9a43-2f6f0d1f6a10","kind":"deadline","offset":"morningOf"},{"id":"9e1c3a52-7b0d-4f6e-8d21-6a4b5c3e2f01","kind":"deadline","offset":"weeksBefore","value":2}]`
+	replaced := patch(completed.Revision, `{"reminder_rules":`+replacement+`}`, 200)
+	assert.Equal(t, decodeRules(replacement), replaced.Rules)
+	stale = humaRequest(t, e, http.MethodPut, path, fmt.Sprintf(`{"base_revision":%d,"client":"api","fields":{"reminder_rules":[]}}`, completed.Revision), token, "")
+	assert.Equal(t, 409, stale.Code, stale.Body.String())
+	assert.Contains(t, stale.Body.String(), `"conflicting_fields":["reminder_rules"]`)
+	rule := func(fields string) string {
+		return `[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47",` + fields + `}]`
+	}
 	for _, invalid := range []string{
 		`null`,
 		`[{"id":"71459f969b7a45e48ac3a87f94b8ed47","kind":"exact","at":"2026-10-20T17:30:00Z"}]`,
 		`[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"exact","at":"2026-10-20T17:30:00Z"},{"id":"71459F96-9B7A-45E4-8AC3-A87F94B8ED47","kind":"exact","at":"2026-10-21T17:30:00Z"}]`,
 		`[{"id":"invalid","kind":"exact","at":"2026-10-20T17:30:00Z"}]`,
-		`[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"anchored","anchor":"deadline","value":60,"unit":"minutes","direction":"before"}]`,
-		`[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"exact","at":"2026-10-20T17:30:00Z","anchor":"deadline"}]`,
 		`[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"exact","at":"2026-10-20T17:30:00Z"},{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"exact","at":"2026-10-21T17:30:00Z"}]`,
+		rule(`"kind":"anchored","offset":"daysBefore","value":1`),
+		rule(`"kind":"deadline"`),
+		rule(`"kind":"deadline","offset":"daysAfter","value":1`),
+		rule(`"kind":"deadline","offset":"plannedDay"`),
+		rule(`"kind":"deadline","offset":"daysBefore"`),
+		rule(`"kind":"deadline","offset":"daysBefore","value":0`),
+		rule(`"kind":"deadline","offset":"daysBefore","value":31`),
+		rule(`"kind":"deadline","offset":"weeksBefore","value":0`),
+		rule(`"kind":"deadline","offset":"weeksBefore","value":13`),
+		rule(`"kind":"deadline","offset":"morningOf","value":1`),
+		rule(`"kind":"deadline","offset":"hourBefore","value":1`),
+		rule(`"kind":"deadline","offset":"morningOf","at":"2026-10-20T17:30:00Z"`),
+		rule(`"kind":"exact"`),
+		rule(`"kind":"exact","at":"2026-10-20T17:30:00Z","offset":"morningOf"`),
+		rule(`"kind":"exact","at":"2026-10-20T17:30:00Z","value":1`),
+		`[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"deadline","offset":"daysBefore","value":2},{"id":"5d0f8f0e-3c47-4c1b-9a43-2f6f0d1f6a10","kind":"deadline","offset":"daysBefore","value":2}]`,
+		`[{"id":"71459f96-9b7a-45e4-8ac3-a87f94b8ed47","kind":"deadline","offset":"hourBefore"},{"id":"5d0f8f0e-3c47-4c1b-9a43-2f6f0d1f6a10","kind":"deadline","offset":"hourBefore"}]`,
 	} {
-		patch(completed.Revision, `{"reminder_rules":`+invalid+`}`, 422)
+		response := humaRequest(t, e, http.MethodPut, path, fmt.Sprintf(`{"base_revision":%d,"client":"phone","fields":{"reminder_rules":%s}}`, replaced.Revision, invalid), token, "")
+		assert.Equal(t, 422, response.Code, invalid)
 	}
-	patch(completed.Revision, `{"deadline_has_time":null}`, 422)
-	cleared := patch(completed.Revision, `{"reminder_rules":[]}`, 200)
+	patch(replaced.Revision, `{"deadline_has_time":null}`, 422)
+	cleared := patch(replaced.Revision, `{"reminder_rules":[]}`, 200)
 	assert.Empty(t, cleared.Rules)
 	assert.NotNil(t, cleared.Rules)
 	list := humaRequest(t, e, http.MethodGet, "/api/v2/finally/projects/1/tasks", "", token, "")
