@@ -11,6 +11,7 @@ package webtests
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +39,15 @@ type googleCalendarDouble struct {
 	refreshStarted  chan struct{}
 	releaseRefresh  chan struct{}
 	refreshOnce     sync.Once
+	calendarCreated int
+	eventRequests   []googleEventRequest
+	eventExists     bool
+}
+
+type googleEventRequest struct {
+	Method string
+	Path   string
+	Body   string
 }
 
 func newGoogleCalendarDouble(t *testing.T) *googleCalendarDouble {
@@ -119,12 +129,126 @@ func newGoogleCalendarDouble(t *testing.T) *googleCalendarDouble {
 				return
 			}
 			_, _ = w.Write([]byte(`{"items":[{"id":"event-1","summary":"Private planning meeting","description":"Sensitive launch notes https://meet.example/private","location":"Private office","start":{"dateTime":"2026-07-16T09:00:00Z"},"end":{"dateTime":"2026-07-16T10:00:00Z"},"attendees":[{"email":"colleague@example.com","responseStatus":"accepted"}],"recurrence":["RRULE:FREQ=WEEKLY"]}]}`))
+		case "/calendar/v3/users/me/calendarList":
+			double.mu.Lock()
+			created := double.calendarCreated > 0
+			double.mu.Unlock()
+			if created {
+				_, _ = w.Write([]byte(`{"items":[{"id":"deadlines-calendar","summary":"Deadlines"}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case "/calendar/v3/calendars":
+			double.mu.Lock()
+			double.calendarCreated++
+			double.mu.Unlock()
+			_, _ = w.Write([]byte(`{"id":"deadlines-calendar","summary":"Deadlines"}`))
 		default:
+			if strings.HasPrefix(r.URL.Path, "/calendar/v3/calendars/deadlines-calendar/events") {
+				body, _ := io.ReadAll(r.Body)
+				double.mu.Lock()
+				double.eventRequests = append(double.eventRequests, googleEventRequest{Method: r.Method, Path: r.URL.Path, Body: string(body)})
+				conflict := r.Method == http.MethodPost && double.eventExists
+				if r.Method == http.MethodPost && !conflict {
+					double.eventExists = true
+				}
+				double.mu.Unlock()
+				if conflict {
+					http.Error(w, "exists", http.StatusConflict)
+					return
+				}
+				if r.Method == http.MethodDelete {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				_, _ = w.Write([]byte(`{"id":"deadline-event"}`))
+				return
+			}
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(double.server.Close)
 	return double
+}
+
+func TestFinallyCalendarReconcilesDeadlineMarkers(t *testing.T) {
+	e, err := setupTestEnv()
+	require.NoError(t, err)
+	double := newGoogleCalendarDouble(t)
+	configureGoogleCalendarDouble(t, double)
+	token := humaTokenFor(t, &testuser1)
+
+	connected := humaRequest(t, e, http.MethodPost, "/api/v2/finally/calendar/accounts", `{"authorization_code":"work","redirect_uri":"finally://oauth"}`, token, "")
+	require.Equal(t, http.StatusCreated, connected.Code, "body: %s", connected.Body.String())
+	created := humaRequest(t, e, http.MethodPost, "/api/v2/finally/projects/1/tasks", `{"title":"File taxes","due_date":"2026-09-14T00:00:00Z"}`, token, "")
+	require.Equal(t, http.StatusCreated, created.Code, "body: %s", created.Body.String())
+	var task struct {
+		ID       int64 `json:"id"`
+		Revision int64 `json:"revision"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &task))
+	taskPath := fmt.Sprintf("/api/v2/finally/tasks/%d", task.ID)
+	patch := func(fields string) {
+		t.Helper()
+		res := humaRequest(t, e, http.MethodPut, taskPath, fmt.Sprintf(`{"base_revision":%d,"client":"phone","fields":%s}`, task.Revision, fields), token, "")
+		require.Equal(t, http.StatusOK, res.Code, "body: %s", res.Body.String())
+		require.NoError(t, json.Unmarshal(res.Body.Bytes(), &task))
+	}
+	markerPath := fmt.Sprintf("/api/v2/finally/calendar/accounts/google-work/deadline-markers/%d", task.ID)
+
+	dateOnly := humaRequest(t, e, http.MethodPut, markerPath, "", token, "")
+	require.Equal(t, http.StatusNoContent, dateOnly.Code, "body: %s", dateOnly.Body.String())
+	patch(`{"due_date":"2026-09-14T00:00:00Z","deadline_has_time":true}`)
+	timed := humaRequest(t, e, http.MethodPut, markerPath, "", token, "")
+	require.Equal(t, http.StatusNoContent, timed.Code, "body: %s", timed.Body.String())
+
+	patch(`{"done":true}`)
+	removed := humaRequest(t, e, http.MethodPut, markerPath, "", token, "")
+	require.Equal(t, http.StatusNoContent, removed.Code, "body: %s", removed.Body.String())
+	patch(`{"done":false}`)
+	reopened := humaRequest(t, e, http.MethodPut, markerPath, "", token, "")
+	require.Equal(t, http.StatusNoContent, reopened.Code, "body: %s", reopened.Body.String())
+	deleted := humaRequest(t, e, http.MethodDelete, fmt.Sprintf("%s?base_revision=%d&client=phone", taskPath, task.Revision), "", token, "")
+	require.Equal(t, http.StatusNoContent, deleted.Code, "body: %s", deleted.Body.String())
+	deletedMarker := humaRequest(t, e, http.MethodDelete, markerPath, "", token, "")
+	require.Equal(t, http.StatusNoContent, deletedMarker.Code, "body: %s", deletedMarker.Body.String())
+
+	double.mu.Lock()
+	defer double.mu.Unlock()
+	require.Equal(t, 1, double.calendarCreated)
+	require.Len(t, double.eventRequests, 7)
+	assert.Equal(t, http.MethodPost, double.eventRequests[0].Method)
+	var dateOnlyEvent map[string]any
+	require.NoError(t, json.Unmarshal([]byte(double.eventRequests[0].Body), &dateOnlyEvent))
+	assert.NotEmpty(t, dateOnlyEvent["id"])
+	delete(dateOnlyEvent, "id")
+	assert.Equal(t, map[string]any{"status": "confirmed", "reminders": map[string]any{"useDefault": false}, "summary": "File taxes", "transparency": "transparent", "start": map[string]any{"date": "2026-09-14"}, "end": map[string]any{"date": "2026-09-15"}}, dateOnlyEvent)
+	assert.Equal(t, http.MethodPost, double.eventRequests[1].Method)
+	assert.Equal(t, http.MethodPut, double.eventRequests[2].Method)
+	assert.JSONEq(t, `{"status":"confirmed","reminders":{"useDefault":false},"summary":"File taxes","transparency":"transparent","start":{"dateTime":"2026-09-14T00:00:00Z"},"end":{"dateTime":"2026-09-14T00:01:00Z"}}`, double.eventRequests[2].Body)
+	assert.Equal(t, http.MethodDelete, double.eventRequests[3].Method)
+	assert.Equal(t, double.eventRequests[2].Path, double.eventRequests[3].Path)
+	assert.Equal(t, http.MethodPut, double.eventRequests[5].Method)
+	assert.Contains(t, double.eventRequests[5].Body, `"status":"confirmed"`)
+	assert.Equal(t, http.MethodDelete, double.eventRequests[6].Method)
+	assert.Equal(t, double.eventRequests[2].Path, double.eventRequests[6].Path)
+}
+
+func TestFinallyCalendarDeadlineMarkersRequireTaskAndAccountAccess(t *testing.T) {
+	e, err := setupTestEnv()
+	require.NoError(t, err)
+	double := newGoogleCalendarDouble(t)
+	configureGoogleCalendarDouble(t, double)
+	path := "/api/v2/finally/calendar/accounts/google-work/deadline-markers/1"
+
+	unauthenticated := humaRequest(t, e, http.MethodPut, path, "", "", "")
+	assert.Equal(t, http.StatusUnauthorized, unauthenticated.Code, "body: %s", unauthenticated.Body.String())
+
+	forbidden := humaRequest(t, e, http.MethodPut, path, "", humaTokenFor(t, &testuser15), "")
+	assert.Equal(t, http.StatusForbidden, forbidden.Code, "body: %s", forbidden.Body.String())
+
+	missingAccount := humaRequest(t, e, http.MethodPut, path, "", humaTokenFor(t, &testuser1), "")
+	assert.Equal(t, http.StatusNotFound, missingAccount.Code, "body: %s", missingAccount.Body.String())
 }
 
 func configureGoogleCalendarDouble(t *testing.T, double *googleCalendarDouble) {

@@ -258,6 +258,10 @@ func (s *Service) ReadContext(ctx context.Context, userID int64, accountIDs []st
 func (s *Service) activeCredentials(ctx context.Context, userID int64, accountID string) (credentials, error) {
 	unlock := lockConnections(userID)
 	defer unlock()
+	return s.activeCredentialsLocked(ctx, userID, accountID)
+}
+
+func (s *Service) activeCredentialsLocked(ctx context.Context, userID int64, accountID string) (credentials, error) {
 	accounts, err := s.load(userID)
 	if err != nil {
 		return credentials{}, fmt.Errorf("load active calendar credentials: %w", err)
