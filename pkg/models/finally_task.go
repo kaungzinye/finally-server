@@ -37,13 +37,13 @@ type FinallyFieldVersion struct {
 type FinallyReminderRule struct {
 	ID     string     `json:"id" doc:"Stable UUID identifying this rule across phones."`
 	Kind   string     `json:"kind" enum:"deadline,exact" doc:"Deadline rules count down to the task's deadline. Exact rules fire once at a fixed instant."`
-	Offset string     `json:"offset,omitempty" enum:"morningOf,daysBefore,weeksBefore,hourBefore" doc:"When a deadline rule fires relative to the deadline."`
-	Value  *int       `json:"value,omitempty" doc:"Days for daysBefore (1 to 30) or weeks for weeksBefore (1 to 12)."`
+	Offset string     `json:"offset,omitempty" enum:"morningOf,daysBefore,weeksBefore,hourBefore,minutesBefore" doc:"When a deadline rule fires relative to the deadline."`
+	Value  *int       `json:"value,omitempty" doc:"Days for daysBefore (1 to 30) weeks for weeksBefore (1 to 12), or minutes for minutesBefore (5 to 55 in steps of 5)."`
 	At     *time.Time `json:"at,omitempty" doc:"RFC3339 instant for an exact rule."`
 }
 
 // A zero maximum marks an offset that carries no value.
-var finallyDeadlineOffsetMaxValues = map[string]int{"morningOf": 0, "daysBefore": 30, "weeksBefore": 12, "hourBefore": 0}
+var finallyDeadlineOffsetMaxValues = map[string]int{"morningOf": 0, "daysBefore": 30, "weeksBefore": 12, "hourBefore": 0, "minutesBefore": 55}
 
 func validateFinallyReminderRules(rules []FinallyReminderRule) error {
 	seen := map[string]bool{}
@@ -64,6 +64,9 @@ func validateFinallyReminderRules(rules []FinallyReminderRule) error {
 			valueValid := rule.Value == nil
 			if maxValue > 0 {
 				valueValid = rule.Value != nil && *rule.Value >= 1 && *rule.Value <= maxValue
+			}
+			if rule.Offset == "minutesBefore" {
+				valueValid = valueValid && *rule.Value%5 == 0
 			}
 			if !known || !valueValid || rule.At != nil {
 				return InvalidFieldErrorWithMessage([]string{"reminder_rules"}, "Deadline rules require a known offset and its value range")

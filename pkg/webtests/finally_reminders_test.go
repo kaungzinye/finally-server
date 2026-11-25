@@ -36,6 +36,7 @@ func TestFinallyCanonicalReminderRules(t *testing.T) {
 		`{"id":"9e1c3a52-7b0d-4f6e-8d21-6a4b5c3e2f01","kind":"deadline","offset":"daysBefore","value":30},` +
 		`{"id":"c2a7e4d9-1f35-4b80-a6c2-0e9d8b7f5a34","kind":"deadline","offset":"weeksBefore","value":12},` +
 		`{"id":"e8b4f1a6-2d93-4c57-b0e1-7f3a9c6d4b28","kind":"deadline","offset":"hourBefore"},` +
+		`{"id":"0b7d2c58-6e14-4a39-9f80-3c5d1e7a9b62","kind":"deadline","offset":"minutesBefore","value":10},` +
 		`{"id":"39082ea0-f135-494a-b73c-c32b77eb8f00","kind":"exact","at":"2026-10-20T15:00:00.125Z"}]`
 	decodeRules := func(rules string) []map[string]interface{} {
 		var out []map[string]interface{}
@@ -109,6 +110,10 @@ func TestFinallyCanonicalReminderRules(t *testing.T) {
 		rule(`"kind":"deadline","offset":"weeksBefore","value":13`),
 		rule(`"kind":"deadline","offset":"morningOf","value":1`),
 		rule(`"kind":"deadline","offset":"hourBefore","value":1`),
+		rule(`"kind":"deadline","offset":"minutesBefore"`),
+		rule(`"kind":"deadline","offset":"minutesBefore","value":0`),
+		rule(`"kind":"deadline","offset":"minutesBefore","value":7`),
+		rule(`"kind":"deadline","offset":"minutesBefore","value":60`),
 		rule(`"kind":"deadline","offset":"morningOf","at":"2026-10-20T17:30:00Z"`),
 		rule(`"kind":"exact"`),
 		rule(`"kind":"exact","at":"2026-10-20T17:30:00Z","offset":"morningOf"`),
