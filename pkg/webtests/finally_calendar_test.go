@@ -139,6 +139,10 @@ func newGoogleCalendarDouble(t *testing.T) *googleCalendarDouble {
 				double.listOnce.Do(func() { close(double.listStarted) })
 				<-double.releaseList
 			}
+			if r.URL.Query().Get("minAccessRole") != "owner" {
+				_, _ = w.Write([]byte(`{"items":[{"id":"shared-deadlines","summary":"Deadlines","accessRole":"reader"}]}`))
+				return
+			}
 			if double.deadlinesOnPageTwo {
 				if r.URL.Query().Get("pageToken") == "" {
 					_, _ = w.Write([]byte(`{"nextPageToken":"page-2","items":[]}`))

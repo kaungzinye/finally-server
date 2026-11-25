@@ -119,12 +119,13 @@ func (s *Service) ReconcileDeadline(ctx context.Context, userID int64, accountID
 }
 
 func (s *Service) deadlineCalendar(ctx context.Context, accessToken string, create bool) (string, error) {
-	endpoint := s.apiURL + "/calendar/v3/users/me/calendarList"
+	// Markers go to a calendar the user owns, never to one shared with them under the same name.
+	query := url.Values{"minAccessRole": {"owner"}}
 	for pageToken := ""; ; {
-		pageEndpoint := endpoint
 		if pageToken != "" {
-			pageEndpoint += "?" + url.Values{"pageToken": {pageToken}}.Encode()
+			query.Set("pageToken", pageToken)
 		}
+		pageEndpoint := s.apiURL + "/calendar/v3/users/me/calendarList?" + query.Encode()
 		var page googleCalendarList
 		if err := s.getJSON(ctx, pageEndpoint, accessToken, &page); err != nil {
 			return "", googleRequestError("list calendars for deadline marker", err)
