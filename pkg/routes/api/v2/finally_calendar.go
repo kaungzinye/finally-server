@@ -14,8 +14,11 @@ import (
 	"net/http"
 	"time"
 
+	"code.vikunja.io/api/pkg/db"
+	"code.vikunja.io/api/pkg/models"
 	calendarcontext "code.vikunja.io/api/pkg/modules/calendar"
 	"code.vikunja.io/api/pkg/user"
+	"code.vikunja.io/api/pkg/web/handler"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -88,6 +91,92 @@ func RegisterFinallyCalendarRoutes(api huma.API) {
 		MaxBodyBytes:  maxFinallyCalendarRequestBody,
 		Tags:          tags,
 	}, finallyCalendarContextRead)
+	Register(api, huma.Operation{
+		OperationID:   "finally-calendar-deadline-reconcile",
+		Summary:       "Reconcile a task deadline marker",
+		Description:   "Creates, updates, or removes a transparent marker in the connected account's Deadlines calendar from the authoritative task state.",
+		Method:        http.MethodPut,
+		Path:          "/finally/calendar/accounts/{account}/deadline-markers/{task}",
+		DefaultStatus: http.StatusNoContent,
+		Tags:          tags,
+	}, finallyCalendarDeadlineReconcile)
+	Register(api, huma.Operation{
+		OperationID:   "finally-calendar-deadline-delete",
+		Summary:       "Remove a task deadline marker",
+		Description:   "Idempotently removes a deleted task's marker from the connected account's Deadlines calendar.",
+		Method:        http.MethodDelete,
+		Path:          "/finally/calendar/accounts/{account}/deadline-markers/{task}",
+		DefaultStatus: http.StatusNoContent,
+		Tags:          tags,
+	}, finallyCalendarDeadlineDelete)
+}
+
+func finallyCalendarDeadlineReconcile(ctx context.Context, in *struct {
+	Account string `path:"account" doc:"The connected Google account id."`
+	Task    int64  `path:"task" doc:"The task id whose deadline marker is reconciled."`
+}) (*emptyBody, error) {
+	u, err := finallyCalendarUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var readErr error
+	read := func() (calendarcontext.DeadlineState, error) {
+		var state calendarcontext.DeadlineState
+		state, readErr = finallyDeadlineState(ctx, in.Task, u)
+		return state, readErr
+	}
+	if err := calendarcontext.NewService().ReconcileDeadline(ctx, u.ID, in.Account, in.Task, read); err != nil {
+		if readErr != nil {
+			return nil, readErr
+		}
+		return nil, finallyCalendarError(err)
+	}
+	return &emptyBody{}, nil
+}
+
+// finallyDeadlineState reads what a task's marker shows, with a date-only deadline on the user's calendar day.
+func finallyDeadlineState(ctx context.Context, taskID int64, u *user.User) (calendarcontext.DeadlineState, error) {
+	task := &models.Task{ID: taskID}
+	if _, err := handler.DoReadOne(ctx, task, u); err != nil {
+		return calendarcontext.DeadlineState{}, translateDomainError(err)
+	}
+	state := calendarcontext.DeadlineState{
+		Title:    task.Title,
+		Deadline: task.DueDate,
+		HasTime:  task.DeadlineHasTime,
+		Active:   !task.Done && !task.DueDate.IsZero(),
+	}
+	if !state.Active || state.HasTime {
+		return state, nil
+	}
+	s := db.NewSession()
+	defer s.Close()
+	fullUser, err := user.GetUserByID(s, u.ID)
+	if err != nil {
+		return calendarcontext.DeadlineState{}, translateDomainError(err)
+	}
+	location, err := time.LoadLocation(fullUser.Timezone)
+	if err != nil {
+		return calendarcontext.DeadlineState{}, huma.Error500InternalServerError("User timezone is invalid")
+	}
+	state.Deadline = state.Deadline.In(location)
+	return state, nil
+}
+
+func finallyCalendarDeadlineDelete(ctx context.Context, in *struct {
+	Account string `path:"account" doc:"The connected Google account id."`
+	Task    int64  `path:"task" doc:"The deleted task id whose marker is removed."`
+}) (*emptyBody, error) {
+	u, err := finallyCalendarUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := calendarcontext.NewService().ReconcileDeadline(ctx, u.ID, in.Account, in.Task, func() (calendarcontext.DeadlineState, error) {
+		return calendarcontext.DeadlineState{}, nil
+	}); err != nil {
+		return nil, finallyCalendarError(err)
+	}
+	return &emptyBody{}, nil
 }
 
 func finallyCalendarAccountsRevoke(ctx context.Context, in *struct {
