@@ -44,10 +44,15 @@ type connectionUserLock struct {
 	refs  int
 }
 
-var connectionLocks = struct {
+type userLocks struct {
 	sync.Mutex
 	byUser map[int64]*connectionUserLock
-}{byUser: map[int64]*connectionUserLock{}}
+}
+
+var connectionLocks = userLocks{byUser: map[int64]*connectionUserLock{}}
+
+// Publication spans Google requests, so it has its own lock and leaves connecting and revoking free.
+var publicationLocks = userLocks{byUser: map[int64]*connectionUserLock{}}
 
 type Account struct {
 	ID    string `json:"id"`
@@ -258,10 +263,6 @@ func (s *Service) ReadContext(ctx context.Context, userID int64, accountIDs []st
 func (s *Service) activeCredentials(ctx context.Context, userID int64, accountID string) (credentials, error) {
 	unlock := lockConnections(userID)
 	defer unlock()
-	return s.activeCredentialsLocked(ctx, userID, accountID)
-}
-
-func (s *Service) activeCredentialsLocked(ctx context.Context, userID int64, accountID string) (credentials, error) {
 	accounts, err := s.load(userID)
 	if err != nil {
 		return credentials{}, fmt.Errorf("load active calendar credentials: %w", err)
@@ -365,25 +366,27 @@ func (s *Service) List(userID int64) ([]Account, error) {
 	return accounts, nil
 }
 
-func lockConnections(userID int64) func() {
-	connectionLocks.Lock()
-	entry := connectionLocks.byUser[userID]
+func lockConnections(userID int64) func() { return connectionLocks.lock(userID) }
+
+func (l *userLocks) lock(userID int64) func() {
+	l.Lock()
+	entry := l.byUser[userID]
 	if entry == nil {
 		entry = &connectionUserLock{}
-		connectionLocks.byUser[userID] = entry
+		l.byUser[userID] = entry
 	}
 	entry.refs++
-	connectionLocks.Unlock()
+	l.Unlock()
 
 	entry.mutex.Lock()
 	return func() {
 		entry.mutex.Unlock()
-		connectionLocks.Lock()
+		l.Lock()
 		entry.refs--
 		if entry.refs == 0 {
-			delete(connectionLocks.byUser, userID)
+			delete(l.byUser, userID)
 		}
-		connectionLocks.Unlock()
+		l.Unlock()
 	}
 }
 

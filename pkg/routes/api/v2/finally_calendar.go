@@ -119,29 +119,48 @@ func finallyCalendarDeadlineReconcile(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	task := &models.Task{ID: in.Task}
-	if _, err := handler.DoReadOne(ctx, task, u); err != nil {
-		return nil, translateDomainError(err)
+	var readErr error
+	read := func() (calendarcontext.DeadlineState, error) {
+		var state calendarcontext.DeadlineState
+		state, readErr = finallyDeadlineState(ctx, in.Task, u)
+		return state, readErr
 	}
-	active := !task.Done && !task.DueDate.IsZero()
-	deadline := task.DueDate
-	if active && !task.DeadlineHasTime {
-		s := db.NewSession()
-		defer s.Close()
-		fullUser, err := user.GetUserByID(s, u.ID)
-		if err != nil {
-			return nil, translateDomainError(err)
+	if err := calendarcontext.NewService().ReconcileDeadline(ctx, u.ID, in.Account, in.Task, read); err != nil {
+		if readErr != nil {
+			return nil, readErr
 		}
-		location, err := time.LoadLocation(fullUser.Timezone)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("User timezone is invalid")
-		}
-		deadline = deadline.In(location)
-	}
-	if err := calendarcontext.NewService().ReconcileDeadline(ctx, u.ID, in.Account, task.ID, task.Title, deadline, task.DeadlineHasTime, active); err != nil {
 		return nil, finallyCalendarError(err)
 	}
 	return &emptyBody{}, nil
+}
+
+// finallyDeadlineState reads what a task's marker shows, with a date-only deadline on the user's calendar day.
+func finallyDeadlineState(ctx context.Context, taskID int64, u *user.User) (calendarcontext.DeadlineState, error) {
+	task := &models.Task{ID: taskID}
+	if _, err := handler.DoReadOne(ctx, task, u); err != nil {
+		return calendarcontext.DeadlineState{}, translateDomainError(err)
+	}
+	state := calendarcontext.DeadlineState{
+		Title:    task.Title,
+		Deadline: task.DueDate,
+		HasTime:  task.DeadlineHasTime,
+		Active:   !task.Done && !task.DueDate.IsZero(),
+	}
+	if !state.Active || state.HasTime {
+		return state, nil
+	}
+	s := db.NewSession()
+	defer s.Close()
+	fullUser, err := user.GetUserByID(s, u.ID)
+	if err != nil {
+		return calendarcontext.DeadlineState{}, translateDomainError(err)
+	}
+	location, err := time.LoadLocation(fullUser.Timezone)
+	if err != nil {
+		return calendarcontext.DeadlineState{}, huma.Error500InternalServerError("User timezone is invalid")
+	}
+	state.Deadline = state.Deadline.In(location)
+	return state, nil
 }
 
 func finallyCalendarDeadlineDelete(ctx context.Context, in *struct {
@@ -152,7 +171,9 @@ func finallyCalendarDeadlineDelete(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	if err := calendarcontext.NewService().ReconcileDeadline(ctx, u.ID, in.Account, in.Task, "", time.Time{}, false, false); err != nil {
+	if err := calendarcontext.NewService().ReconcileDeadline(ctx, u.ID, in.Account, in.Task, func() (calendarcontext.DeadlineState, error) {
+		return calendarcontext.DeadlineState{}, nil
+	}); err != nil {
 		return nil, finallyCalendarError(err)
 	}
 	return &emptyBody{}, nil

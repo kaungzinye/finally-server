@@ -41,7 +41,12 @@ type googleCalendarDouble struct {
 	refreshOnce     sync.Once
 	calendarCreated int
 	eventRequests   []googleEventRequest
-	eventExists     bool
+	// Each marker's status by event path. Google keeps a deleted event as cancelled.
+	events             map[string]string
+	deadlinesOnPageTwo bool
+	listStarted        chan struct{}
+	releaseList        chan struct{}
+	listOnce           sync.Once
 }
 
 type googleEventRequest struct {
@@ -130,6 +135,18 @@ func newGoogleCalendarDouble(t *testing.T) *googleCalendarDouble {
 			}
 			_, _ = w.Write([]byte(`{"items":[{"id":"event-1","summary":"Private planning meeting","description":"Sensitive launch notes https://meet.example/private","location":"Private office","start":{"dateTime":"2026-07-16T09:00:00Z"},"end":{"dateTime":"2026-07-16T10:00:00Z"},"attendees":[{"email":"colleague@example.com","responseStatus":"accepted"}],"recurrence":["RRULE:FREQ=WEEKLY"]}]}`))
 		case "/calendar/v3/users/me/calendarList":
+			if double.listStarted != nil {
+				double.listOnce.Do(func() { close(double.listStarted) })
+				<-double.releaseList
+			}
+			if double.deadlinesOnPageTwo {
+				if r.URL.Query().Get("pageToken") == "" {
+					_, _ = w.Write([]byte(`{"nextPageToken":"page-2","items":[]}`))
+				} else {
+					_, _ = w.Write([]byte(`{"items":[{"id":"deadlines-calendar","summary":"Deadlines"}]}`))
+				}
+				return
+			}
 			double.mu.Lock()
 			created := double.calendarCreated > 0
 			double.mu.Unlock()
@@ -148,17 +165,38 @@ func newGoogleCalendarDouble(t *testing.T) *googleCalendarDouble {
 				body, _ := io.ReadAll(r.Body)
 				double.mu.Lock()
 				double.eventRequests = append(double.eventRequests, googleEventRequest{Method: r.Method, Path: r.URL.Path, Body: string(body)})
-				conflict := r.Method == http.MethodPost && double.eventExists
-				if r.Method == http.MethodPost && !conflict {
-					double.eventExists = true
+				if double.events == nil {
+					double.events = map[string]string{}
+				}
+				var event struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+				}
+				_ = json.Unmarshal(body, &event)
+				path := r.URL.Path
+				if r.Method == http.MethodPost {
+					path += "/" + event.ID
+				}
+				status, exists := double.events[path]
+				code := http.StatusOK
+				switch {
+				case r.Method == http.MethodPost && exists:
+					code = http.StatusConflict
+				case r.Method == http.MethodPut && !exists:
+					code = http.StatusNotFound
+				case r.Method == http.MethodDelete && !exists:
+					code = http.StatusNotFound
+				case r.Method == http.MethodDelete && status == "cancelled":
+					code = http.StatusGone
+				case r.Method == http.MethodDelete:
+					double.events[path] = "cancelled"
+					code = http.StatusNoContent
+				case event.Status != "":
+					double.events[path] = event.Status
 				}
 				double.mu.Unlock()
-				if conflict {
-					http.Error(w, "exists", http.StatusConflict)
-					return
-				}
-				if r.Method == http.MethodDelete {
-					w.WriteHeader(http.StatusNoContent)
+				if code != http.StatusOK {
+					w.WriteHeader(code)
 					return
 				}
 				_, _ = w.Write([]byte(`{"id":"deadline-event"}`))
@@ -208,6 +246,12 @@ func TestFinallyCalendarReconcilesDeadlineMarkers(t *testing.T) {
 	patch(`{"done":false}`)
 	reopened := humaRequest(t, e, http.MethodPut, markerPath, "", token, "")
 	require.Equal(t, http.StatusNoContent, reopened.Code, "body: %s", reopened.Body.String())
+	double.mu.Lock()
+	require.Len(t, double.events, 1)
+	for _, status := range double.events {
+		assert.Equal(t, "confirmed", status, "a reopened task's marker is visible again")
+	}
+	double.mu.Unlock()
 	deleted := humaRequest(t, e, http.MethodDelete, fmt.Sprintf("%s?base_revision=%d&client=phone", taskPath, task.Revision), "", token, "")
 	require.Equal(t, http.StatusNoContent, deleted.Code, "body: %s", deleted.Body.String())
 	deletedMarker := humaRequest(t, e, http.MethodDelete, markerPath, "", token, "")
@@ -232,6 +276,88 @@ func TestFinallyCalendarReconcilesDeadlineMarkers(t *testing.T) {
 	assert.Contains(t, double.eventRequests[5].Body, `"status":"confirmed"`)
 	assert.Equal(t, http.MethodDelete, double.eventRequests[6].Method)
 	assert.Equal(t, double.eventRequests[2].Path, double.eventRequests[6].Path)
+}
+
+func TestFinallyCalendarDeadlineMarkersFollowCalendarPages(t *testing.T) {
+	e, err := setupTestEnv()
+	require.NoError(t, err)
+	double := newGoogleCalendarDouble(t)
+	double.deadlinesOnPageTwo = true
+	configureGoogleCalendarDouble(t, double)
+	token := humaTokenFor(t, &testuser1)
+	connected := humaRequest(t, e, http.MethodPost, "/api/v2/finally/calendar/accounts", `{"authorization_code":"work","redirect_uri":"finally://oauth"}`, token, "")
+	require.Equal(t, http.StatusCreated, connected.Code, connected.Body.String())
+	created := humaRequest(t, e, http.MethodPost, "/api/v2/finally/projects/1/tasks", `{"title":"File taxes","due_date":"2026-09-14T00:00:00Z"}`, token, "")
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var task struct {
+		ID int64 `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &task))
+	path := fmt.Sprintf("/api/v2/finally/calendar/accounts/google-work/deadline-markers/%d", task.ID)
+
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		res := humaRequest(t, e, method, path, "", token, "")
+		require.Equal(t, http.StatusNoContent, res.Code, res.Body.String())
+	}
+
+	double.mu.Lock()
+	defer double.mu.Unlock()
+	assert.Zero(t, double.calendarCreated)
+	require.Len(t, double.events, 1)
+	for _, status := range double.events {
+		assert.Equal(t, "cancelled", status)
+	}
+}
+
+func TestFinallyCalendarDeadlineMarkersPublishTheLatestTask(t *testing.T) {
+	e, err := setupTestEnv()
+	require.NoError(t, err)
+	double := newGoogleCalendarDouble(t)
+	double.listStarted = make(chan struct{})
+	double.releaseList = make(chan struct{})
+	configureGoogleCalendarDouble(t, double)
+	token := humaTokenFor(t, &testuser1)
+	connect := func(code string) int {
+		return humaRequest(t, e, http.MethodPost, "/api/v2/finally/calendar/accounts", fmt.Sprintf(`{"authorization_code":%q,"redirect_uri":"finally://oauth"}`, code), token, "").Code
+	}
+	require.Equal(t, http.StatusCreated, connect("work"))
+	created := humaRequest(t, e, http.MethodPost, "/api/v2/finally/projects/1/tasks", `{"title":"File taxes","due_date":"2026-09-14T00:00:00Z"}`, token, "")
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var task struct {
+		ID       int64 `json:"id"`
+		Revision int64 `json:"revision"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &task))
+	path := fmt.Sprintf("/api/v2/finally/calendar/accounts/google-work/deadline-markers/%d", task.ID)
+	results := make(chan int, 2)
+	reconcile := func() { results <- humaRequest(t, e, http.MethodPut, path, "", token, "").Code }
+
+	go reconcile()
+	<-double.listStarted
+	// The second request queues behind the first while the task is still open.
+	go reconcile()
+	time.Sleep(200 * time.Millisecond)
+	done := humaRequest(t, e, http.MethodPut, fmt.Sprintf("/api/v2/finally/tasks/%d", task.ID), fmt.Sprintf(`{"base_revision":%d,"client":"phone","fields":{"done":true}}`, task.Revision), token, "")
+	assert.Equal(t, http.StatusOK, done.Code, done.Body.String())
+	// Publication waiting on Google leaves account connections free.
+	connected := make(chan int, 1)
+	go func() { connected <- connect("home") }()
+	select {
+	case code := <-connected:
+		assert.Equal(t, http.StatusCreated, code)
+	case <-time.After(5 * time.Second):
+		t.Error("connecting an account waited for publication")
+	}
+	close(double.releaseList)
+	assert.Equal(t, http.StatusNoContent, <-results)
+	assert.Equal(t, http.StatusNoContent, <-results)
+
+	double.mu.Lock()
+	defer double.mu.Unlock()
+	require.Len(t, double.events, 1)
+	for _, status := range double.events {
+		assert.Equal(t, "cancelled", status)
+	}
 }
 
 func TestFinallyCalendarDeadlineMarkersRequireTaskAndAccountAccess(t *testing.T) {
