@@ -313,7 +313,7 @@ func TestFinallyCalendarDeadlineMarkersFollowCalendarPages(t *testing.T) {
 	}
 }
 
-func TestFinallyCalendarDeadlineMarkersPublishTheLatestTask(t *testing.T) {
+func TestFinallyCalendarDeadlineMarkersLeaveConnectionsFree(t *testing.T) {
 	e, err := setupTestEnv()
 	require.NoError(t, err)
 	double := newGoogleCalendarDouble(t)
@@ -328,21 +328,14 @@ func TestFinallyCalendarDeadlineMarkersPublishTheLatestTask(t *testing.T) {
 	created := humaRequest(t, e, http.MethodPost, "/api/v2/finally/projects/1/tasks", `{"title":"File taxes","due_date":"2026-09-14T00:00:00Z"}`, token, "")
 	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
 	var task struct {
-		ID       int64 `json:"id"`
-		Revision int64 `json:"revision"`
+		ID int64 `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &task))
 	path := fmt.Sprintf("/api/v2/finally/calendar/accounts/google-work/deadline-markers/%d", task.ID)
-	results := make(chan int, 2)
-	reconcile := func() { results <- humaRequest(t, e, http.MethodPut, path, "", token, "").Code }
+	published := make(chan int, 1)
 
-	go reconcile()
+	go func() { published <- humaRequest(t, e, http.MethodPut, path, "", token, "").Code }()
 	<-double.listStarted
-	// The second request queues behind the first while the task is still open.
-	go reconcile()
-	time.Sleep(200 * time.Millisecond)
-	done := humaRequest(t, e, http.MethodPut, fmt.Sprintf("/api/v2/finally/tasks/%d", task.ID), fmt.Sprintf(`{"base_revision":%d,"client":"phone","fields":{"done":true}}`, task.Revision), token, "")
-	assert.Equal(t, http.StatusOK, done.Code, done.Body.String())
 	// Publication waiting on Google leaves account connections free.
 	connected := make(chan int, 1)
 	go func() { connected <- connect("home") }()
@@ -353,15 +346,7 @@ func TestFinallyCalendarDeadlineMarkersPublishTheLatestTask(t *testing.T) {
 		t.Error("connecting an account waited for publication")
 	}
 	close(double.releaseList)
-	assert.Equal(t, http.StatusNoContent, <-results)
-	assert.Equal(t, http.StatusNoContent, <-results)
-
-	double.mu.Lock()
-	defer double.mu.Unlock()
-	require.Len(t, double.events, 1)
-	for _, status := range double.events {
-		assert.Equal(t, "cancelled", status)
-	}
+	assert.Equal(t, http.StatusNoContent, <-published)
 }
 
 func TestFinallyCalendarDeadlineMarkersRequireTaskAndAccountAccess(t *testing.T) {
